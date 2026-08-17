@@ -19,10 +19,28 @@ Parameters:
     Type: String
     Description: Bucket S3 privado usado por Athena para datos y resultados.
 
+  BucketMultimedia:
+    Type: String
+    Description: Bucket multimedia privado creado por Terraform.
+
+  ArnColaFotos:
+    Type: String
+    Description: ARN de la cola principal de fotografías creada por Terraform.
+
+  ArnDlqFotos:
+    Type: String
+    Description: ARN de la DLQ de fotografías creada por Terraform.
+
   OrigenCors:
     Type: String
-    AllowedPattern: "https://.+|http://localhost(:[0-9]+)?"
+    AllowedPattern: "https://.+|http://.+"
     Description: Dominio autorizado para consumir la API.
+
+  OrigenCorsProductivoConfirmado:
+    Type: String
+    Default: https://academy.invalid
+    AllowedPattern: "https://.+"
+    Description: Confirmación HTTPS usada por Rules cuando el modo es productivo.
 
   DynamoDbEndpointLocal:
     Type: String
@@ -49,6 +67,28 @@ Parameters:
       - "false"
     Description: Simula indisponibilidad de la replica DynamoDB principal.
 
+  ModoDespliegue:
+    Type: String
+    Default: productivo
+    AllowedValues: [productivo, academy]
+
+  CargasFotografiasHabilitadas:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+
+Conditions:
+  EsAcademy: !Equals [!Ref ModoDespliegue, academy]
+  EsProductivo: !Not [!Condition EsAcademy]
+
+Rules:
+  CorsSeguroSegunModo:
+    Assertions:
+      - Assert: !Or
+          - !Equals [!Ref ModoDespliegue, academy]
+          - !Equals [!Ref OrigenCors, !Ref OrigenCorsProductivoConfirmado]
+        AssertDescription: El modo productivo exige un origen CORS HTTPS.
+
 Globals:
   Function:
     Runtime: nodejs22.x
@@ -69,6 +109,7 @@ Globals:
         DYNAMODB_REGION_PRINCIPAL: !Ref RegionDynamoPrincipal
         DYNAMODB_REGION_RESPALDO: !Ref RegionDynamoRespaldo
         SIMULAR_FALLO_DYNAMODB_PRINCIPAL: !Ref SimularFalloDynamoPrincipal
+        CARGAS_FOTOGRAFIAS_HABILITADAS: !Ref CargasFotografiasHabilitadas
 
   HttpApi:
     CorsConfiguration:
@@ -182,6 +223,7 @@ Resources:
 
   PoliticaDynamoGlobal:
     Type: AWS::IAM::ManagedPolicy
+    Condition: EsProductivo
     Properties:
       Description: Acceso acotado a la Global Table y sus índices en ambas regiones.
       PolicyDocument:
@@ -202,18 +244,278 @@ Resources:
               - !Sub "arn:${AWS::Partition}:dynamodb:${RegionDynamoRespaldo}:${AWS::AccountId}:table/${NombreTabla}"
               - !Sub "arn:${AWS::Partition}:dynamodb:${RegionDynamoRespaldo}:${AWS::AccountId}:table/${NombreTabla}/index/*"
 
+  RolSesionesProductivo:
+    Type: AWS::IAM::Role
+    Condition: EsProductivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - Ref: PoliticaDynamoGlobal
+  RolAccesoProductivo:
+    Type: AWS::IAM::Role
+    Condition: EsProductivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - Ref: PoliticaDynamoGlobal
+      Policies:
+      - PolicyName: CognitoIngresoGrupo
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: cognito-idp:AdminInitiateAuth
+            Resource:
+              Fn::GetAtt:
+              - PoolGrupos
+              - Arn
+  RolProfesorProductivo:
+    Type: AWS::IAM::Role
+    Condition: EsProductivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - Ref: PoliticaDynamoGlobal
+      Policies:
+      - PolicyName: CognitoGestionGrupos
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - cognito-idp:AdminCreateUser
+            - cognito-idp:AdminGetUser
+            - cognito-idp:AdminAddUserToGroup
+            - cognito-idp:AdminSetUserPassword
+            - cognito-idp:AdminUpdateUserAttributes
+            Resource:
+              Fn::GetAtt:
+              - PoolGrupos
+              - Arn
+  RolFase1Productivo:
+    Type: AWS::IAM::Role
+    Condition: EsProductivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - Ref: PoliticaDynamoGlobal
+  RolFase2Productivo:
+    Type: AWS::IAM::Role
+    Condition: EsProductivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - Ref: PoliticaDynamoGlobal
+  RolFase3Productivo:
+    Type: AWS::IAM::Role
+    Condition: EsProductivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - Ref: PoliticaDynamoGlobal
+  RolFase4Productivo:
+    Type: AWS::IAM::Role
+    Condition: EsProductivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - Ref: PoliticaDynamoGlobal
+  RolFase5Productivo:
+    Type: AWS::IAM::Role
+    Condition: EsProductivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - Ref: PoliticaDynamoGlobal
+  RolAnalyticsProductivo:
+    Type: AWS::IAM::Role
+    Condition: EsProductivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - Ref: PoliticaDynamoGlobal
+      Policies:
+      - PolicyName: ConsultasAthena
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - athena:GetQueryExecution
+            - athena:GetQueryResults
+            - athena:StartQueryExecution
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - glue:GetDatabase
+            - glue:GetDatabases
+            - glue:GetTable
+            - glue:GetTables
+            - glue:GetPartitions
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - s3:GetBucketLocation
+            - s3:ListBucket
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:s3:::${NombreBucketDatalake}
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:PutObject
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:s3:::${NombreBucketDatalake}/*
+  RolFotografiasApiProductivo:
+    Type: AWS::IAM::Role
+    Condition: EsProductivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - Ref: PoliticaDynamoGlobal
+      Policies:
+      - PolicyName: CargaFotografias
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: s3:PutObject
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:s3:::${BucketMultimedia}/entradas/*
+  RolConsumidorFotografiasProductivo:
+    Type: AWS::IAM::Role
+    Condition: EsProductivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - Ref: PoliticaDynamoGlobal
+      Policies:
+      - PolicyName: ConsumoFotografias
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:GetObjectVersion
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:s3:::${BucketMultimedia}/entradas/*
+          - Effect: Allow
+            Action:
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+            Resource:
+              Ref: ArnColaFotos
+  RolReconciliadorFotografiasProductivo:
+    Type: AWS::IAM::Role
+    Condition: EsProductivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - Ref: PoliticaDynamoGlobal
+      Policies:
+      - PolicyName: ConsumoDlqFotografias
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+            Resource:
+              Ref: ArnDlqFotos
   FuncionAcceso:
     Type: AWS::Serverless::Function
     Properties:
+      Role: !If [EsAcademy, !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole", !GetAtt RolAccesoProductivo.Arn]
       CodeUri: .
       Handler: src/acceso/api.manejador
       ReservedConcurrentExecutions: 10
-      Policies:
-        - !Ref PoliticaDynamoGlobal
-        - Statement:
-            - Effect: Allow
-              Action: cognito-idp:AdminInitiateAuth
-              Resource: !GetAtt PoolGrupos.Arn
       Events:
         Ingresar:
           Type: HttpApi
@@ -238,21 +540,11 @@ Resources:
   FuncionProfesor:
     Type: AWS::Serverless::Function
     Properties:
+      Role: !If [EsAcademy, !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole", !GetAtt RolProfesorProductivo.Arn]
       CodeUri: .
       Handler: src/profesor/api.manejador
       Timeout: 300
       ReservedConcurrentExecutions: 5
-      Policies:
-        - !Ref PoliticaDynamoGlobal
-        - Statement:
-            - Effect: Allow
-              Action:
-                - cognito-idp:AdminCreateUser
-                - cognito-idp:AdminGetUser
-                - cognito-idp:AdminAddUserToGroup
-                - cognito-idp:AdminSetUserPassword
-                - cognito-idp:AdminUpdateUserAttributes
-              Resource: !GetAtt PoolGrupos.Arn
       Events:
         IngresarProfesor:
           Type: HttpApi
@@ -309,10 +601,9 @@ Resources:
   FuncionSesiones:
     Type: AWS::Serverless::Function
     Properties:
+      Role: !If [EsAcademy, !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole", !GetAtt RolSesionesProductivo.Arn]
       CodeUri: .
       Handler: src/sesiones/api.manejador
-      Policies:
-        - !Ref PoliticaDynamoGlobal
       Events:
         ObtenerSesionActual:
           Type: HttpApi
@@ -335,10 +626,9 @@ Resources:
   FuncionFase1:
     Type: AWS::Serverless::Function
     Properties:
+      Role: !If [EsAcademy, !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole", !GetAtt RolFase1Productivo.Arn]
       CodeUri: .
       Handler: src/fase1/api.manejador
-      Policies:
-        - !Ref PoliticaDynamoGlobal
       Events:
         EstadoFase1:
           Type: HttpApi
@@ -403,10 +693,9 @@ Resources:
   FuncionFase2:
     Type: AWS::Serverless::Function
     Properties:
+      Role: !If [EsAcademy, !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole", !GetAtt RolFase2Productivo.Arn]
       CodeUri: .
       Handler: src/fase2/api.manejador
-      Policies:
-        - !Ref PoliticaDynamoGlobal
       Events:
         EstadoFase2:
           Type: HttpApi
@@ -471,10 +760,9 @@ Resources:
   FuncionFase3:
     Type: AWS::Serverless::Function
     Properties:
+      Role: !If [EsAcademy, !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole", !GetAtt RolFase3Productivo.Arn]
       CodeUri: .
       Handler: src/fase3/api.manejador
-      Policies:
-        - !Ref PoliticaDynamoGlobal
       Events:
         EstadoFase3:
           Type: HttpApi
@@ -532,10 +820,9 @@ Resources:
   FuncionFase4:
     Type: AWS::Serverless::Function
     Properties:
+      Role: !If [EsAcademy, !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole", !GetAtt RolFase4Productivo.Arn]
       CodeUri: .
       Handler: src/fase4/api.manejador
-      Policies:
-        - !Ref PoliticaDynamoGlobal
       Events:
         EstadoFase4:
           Type: HttpApi
@@ -576,10 +863,9 @@ Resources:
   FuncionFase5:
     Type: AWS::Serverless::Function
     Properties:
+      Role: !If [EsAcademy, !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole", !GetAtt RolFase5Productivo.Arn]
       CodeUri: .
       Handler: src/fase5/api.manejador
-      Policies:
-        - !Ref PoliticaDynamoGlobal
       Events:
         EstadoFase5:
           Type: HttpApi
@@ -621,35 +907,9 @@ Resources:
   FuncionAnalytics:
     Type: AWS::Serverless::Function
     Properties:
+      Role: !If [EsAcademy, !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole", !GetAtt RolAnalyticsProductivo.Arn]
       CodeUri: .
       Handler: src/analytics/api.manejador
-      Policies:
-        - !Ref PoliticaDynamoGlobal
-        - Statement:
-            - Effect: Allow
-              Action:
-                - athena:GetQueryExecution
-                - athena:GetQueryResults
-                - athena:StartQueryExecution
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - glue:GetDatabase
-                - glue:GetDatabases
-                - glue:GetTable
-                - glue:GetTables
-                - glue:GetPartitions
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - s3:GetBucketLocation
-                - s3:ListBucket
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${NombreBucketDatalake}"
-            - Effect: Allow
-              Action:
-                - s3:GetObject
-                - s3:PutObject
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${NombreBucketDatalake}/*"
       Timeout: 30
       Environment:
         Variables:
@@ -675,6 +935,105 @@ Resources:
         Target: es2022
         Platform: node
         Format: cjs
+
+  FuncionFotografiasApi:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !If [EsAcademy, !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole", !GetAtt RolFotografiasApiProductivo.Arn]
+      CodeUri: .
+      Handler: src/fotografias/api.manejador
+      ReservedConcurrentExecutions: 5
+      Environment:
+        Variables:
+          BUCKET_MULTIMEDIA: !Ref BucketMultimedia
+      Events:
+        IniciarFoto:
+          Type: HttpApi
+          Properties: { ApiId: !Ref ApiBackend, Path: /api/fotografias, Method: POST }
+        ConsultarFotoGrupo:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiBackend
+            Path: /api/fotografias/{trabajoId}
+            Method: GET
+        ConsultarFotoProfesor:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiBackend
+            Path: /api/profesor/fotografias/{trabajoId}
+            Method: GET
+            Auth: { Authorizer: AuthorizerProfesores }
+        ReintentarFotoProfesor:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiBackend
+            Path: /api/profesor/fotografias/{trabajoId}/reintento
+            Method: POST
+            Auth: { Authorizer: AuthorizerProfesores }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties: { EntryPoints: [src/fotografias/api.ts], Bundle: true, Minify: false, Sourcemap: true, Target: es2022, Platform: node, Format: cjs }
+
+  FuncionConsumidorFotografias:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !If [EsAcademy, !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole", !GetAtt RolConsumidorFotografiasProductivo.Arn]
+      CodeUri: .
+      Handler: src/fotografias/consumidor.manejador
+      Timeout: 120
+      ReservedConcurrentExecutions: 4
+      Environment:
+        Variables:
+          CAOS_FOTOS: "false"
+          BUCKET_MULTIMEDIA: !Ref BucketMultimedia
+      Events:
+        ColaFotografias:
+          Type: SQS
+          Properties:
+            Queue: !Ref ArnColaFotos
+            BatchSize: 5
+            FunctionResponseTypes: [ReportBatchItemFailures]
+            ScalingConfig: { MaximumConcurrency: 4 }
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties: { EntryPoints: [src/fotografias/consumidor.ts], Bundle: true, Minify: false, Sourcemap: true, Target: es2022, Platform: node, Format: cjs }
+
+  FuncionReconciliadorFotografias:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !If [EsAcademy, !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole", !GetAtt RolReconciliadorFotografiasProductivo.Arn]
+      CodeUri: .
+      Handler: src/fotografias/reconciliador.manejador
+      Timeout: 30
+      ReservedConcurrentExecutions: 1
+      Events:
+        Programado:
+          Type: Schedule
+          Properties: { Schedule: "rate(5 minutes)", Enabled: true }
+        DlqFotografias:
+          Type: SQS
+          Properties:
+            Queue: !Ref ArnDlqFotos
+            BatchSize: 5
+            FunctionResponseTypes: [ReportBatchItemFailures]
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties: { EntryPoints: [src/fotografias/reconciliador.ts], Bundle: true, Minify: false, Sourcemap: true, Target: es2022, Platform: node, Format: cjs }
+
+  # AWS Academy no permite crear roles/policies IAM. Estas funciones reutilizan
+  AlarmaErroresConsumidorFotos:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Errores del bulkhead consumidor de fotografías
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref FuncionConsumidorFotografias }]
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
 
 Outputs:
   UrlApi:

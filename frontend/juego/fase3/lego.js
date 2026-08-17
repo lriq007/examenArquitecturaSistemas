@@ -50,6 +50,7 @@ if (exigirSesionGrupo()) {
   let enviadoLego = false;
   let modalFinMostrado = false;
   let fotoBase64 = "";
+  let trabajoFotoId = "";
 
   function claveFotoLocal() {
     const grupo = datosGrupoLocal();
@@ -513,16 +514,22 @@ if (exigirSesionGrupo()) {
 
       try {
         if (conFoto) {
-          try {
-            localStorage.setItem(
-              claveFotoLocal(),
-              fotoBase64,
-            );
-          } catch {
-            localStorage.removeItem(
-              claveFotoLocal(),
-            );
+          const archivo = inputFoto.files?.[0];
+          if (!archivo) throw new Error("Selecciona nuevamente la fotografía.");
+          const inicio = await iniciarCargaFotografia(archivo);
+          trabajoFotoId = inicio.trabajoId;
+          localStorage.setItem("trabajoFotoLegoActual", trabajoFotoId);
+          await cargarFotografiaFirmada(inicio.urlCarga, archivo);
+          errorFoto.textContent = "Fotografía recibida. La estamos procesando de forma segura…";
+          errorFoto.style.display = "block";
+          let procesada = false;
+          for (let intento = 0; intento < 10; intento += 1) {
+            await new Promise((resolver) => setTimeout(resolver, 1500));
+            const seguimiento = await consultarFotografia(trabajoFotoId);
+            if (seguimiento.estado === "PROCESADA") { errorFoto.textContent = `¡Fotografía procesada! Trabajo ${trabajoFotoId}`; procesada = true; break; }
+            if (seguimiento.estado === "FALLIDA") throw new Error("La fotografía no pudo procesarse. El profesor puede ayudar a recuperarla.");
           }
+          if (!procesada) throw new Error(`La fotografía sigue recibida. Conservamos el trabajo ${trabajoFotoId}; vuelve a intentar el seguimiento antes de continuar.`);
         }
 
         const estado =
@@ -534,6 +541,7 @@ if (exigirSesionGrupo()) {
                 conFoto,
                 sinFoto:
                   sinFotoMarcada,
+                trabajoFotoId: conFoto ? trabajoFotoId : undefined,
               }),
             },
           );

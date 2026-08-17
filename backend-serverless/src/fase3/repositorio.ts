@@ -39,6 +39,7 @@ export interface GrupoFase3 {
   legoCompletado: boolean;
   legoConFoto: boolean;
   legoSinFoto: boolean;
+  trabajoFotoId?: string;
 
   ruletaLegoIntentos: number;
   ruletaLegoUltimo: string;
@@ -80,6 +81,7 @@ export interface RepositorioFase3 {
     grupoId: string,
     conFoto: boolean,
     sinFoto: boolean,
+    trabajoFotoId?: string,
   ): Promise<boolean>;
 
   guardarResultadoRuleta(
@@ -140,6 +142,7 @@ function convertirGrupo(
     legoCompletado: Boolean(item.legoCompletado),
     legoConFoto: Boolean(item.legoConFoto),
     legoSinFoto: Boolean(item.legoSinFoto),
+    ...(item.trabajoFotoId ? { trabajoFotoId: String(item.trabajoFotoId) } : {}),
 
     ruletaLegoIntentos: Number(item.ruletaLegoIntentos || 0),
     ruletaLegoUltimo: texto(item.ruletaLegoUltimo),
@@ -365,6 +368,7 @@ export const repositorioFase3: RepositorioFase3 = {
     grupoId: string,
     conFoto: boolean,
     sinFoto: boolean,
+    trabajoFotoId?: string,
   ): Promise<boolean> {
     try {
       await baseDatos.send(
@@ -375,7 +379,8 @@ export const repositorioFase3: RepositorioFase3 = {
             "SET legoCompletado = :verdadero, " +
             "legoConFoto = :conFoto, " +
             "legoSinFoto = :sinFoto, " +
-            "fechaLegoCompletado = :ahora",
+            "fechaLegoCompletado = :ahora, " +
+            "trabajoFotoId = :trabajoFotoId",
           ConditionExpression:
             "attribute_exists(PK) AND " +
             "(attribute_not_exists(legoCompletado) " +
@@ -386,6 +391,7 @@ export const repositorioFase3: RepositorioFase3 = {
             ":conFoto": conFoto,
             ":sinFoto": sinFoto,
             ":ahora": new Date().toISOString(),
+            ":trabajoFotoId": trabajoFotoId || null,
           },
         }),
       );

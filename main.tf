@@ -48,6 +48,18 @@ variable "nombre_tabla" {
   default     = "MisionEmprende-prod"
 }
 
+variable "habilitar_cargas_fotografias" {
+  description = "Habilita S3→SQS solo después de aprobar formalmente retención/eliminación"
+  type        = bool
+  default     = false
+}
+
+variable "modo_academy" {
+  description = "Activa explícitamente S3 Static Website para AWS Academy; por defecto conserva CloudFront privado"
+  type        = bool
+  default     = false
+}
+
 locals {
   prefijo = "mision-emprende-${var.entorno}-${data.aws_caller_identity.actual.account_id}"
   tags = {
@@ -125,9 +137,9 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
   bucket = aws_s3_bucket.frontend.id
 
   block_public_acls       = true
-  block_public_policy     = true
+  block_public_policy     = !var.modo_academy
   ignore_public_acls      = true
-  restrict_public_buckets = true
+  restrict_public_buckets = !var.modo_academy
 }
 
 resource "aws_s3_bucket_versioning" "frontend" {
@@ -139,6 +151,7 @@ resource "aws_s3_bucket_versioning" "frontend" {
 
 # ════════════════════════════════════════════════════════════════════════════
 resource "aws_cloudfront_origin_access_control" "frontend" {
+  count                             = var.modo_academy ? 0 : 1
   name                              = "${local.prefijo}-frontend-oac"
   description                       = "Acceso privado de CloudFront al bucket frontend"
   origin_access_control_origin_type = "s3"
@@ -148,13 +161,14 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
 
 # CloudFront entrega el sitio exclusivamente mediante HTTPS al navegador.
 resource "aws_cloudfront_distribution" "frontend" {
+  count               = var.modo_academy ? 0 : 1
   enabled             = true
   default_root_object = "index.html"
 
   origin {
     domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name
     origin_id                = "s3-frontend-privado"
-    origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
+    origin_access_control_id = aws_cloudfront_origin_access_control.frontend[0].id
   }
 
   default_cache_behavior {
@@ -177,6 +191,7 @@ resource "aws_cloudfront_distribution" "frontend" {
 }
 
 resource "aws_s3_bucket_policy" "frontend" {
+  count  = var.modo_academy ? 0 : 1
   bucket = aws_s3_bucket.frontend.id
   policy = jsonencode({
     Version = "2012-10-17"
@@ -188,11 +203,34 @@ resource "aws_s3_bucket_policy" "frontend" {
       Resource  = "${aws_s3_bucket.frontend.arn}/*"
       Condition = {
         StringEquals = {
-          "AWS:SourceArn" = aws_cloudfront_distribution.frontend.arn
+          "AWS:SourceArn" = aws_cloudfront_distribution.frontend[0].arn
         }
       }
     }]
   })
+}
+
+resource "aws_s3_bucket_website_configuration" "frontend_academy" {
+  count  = var.modo_academy ? 1 : 0
+  bucket = aws_s3_bucket.frontend.id
+  index_document { suffix = "index.html" }
+  error_document { key = "index.html" }
+}
+
+resource "aws_s3_bucket_policy" "frontend_academy" {
+  count  = var.modo_academy ? 1 : 0
+  bucket = aws_s3_bucket.frontend.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "LecturaPublicaSoloFrontendAcademy"
+      Effect    = "Allow"
+      Principal = "*"
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.frontend.arn}/*"
+    }]
+  })
+  depends_on = [aws_s3_bucket_public_access_block.frontend]
 }
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -212,15 +250,133 @@ resource "aws_s3_bucket_public_access_block" "multimedia" {
   restrict_public_buckets = true
 }
 
+resource "aws_s3_bucket_versioning" "multimedia" {
+  bucket = aws_s3_bucket.multimedia.id
+  versioning_configuration { status = "Enabled" }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "multimedia" {
+  bucket = aws_s3_bucket.multimedia.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "multimedia" {
+  bucket = aws_s3_bucket.multimedia.id
+
+  rule {
+    id     = "retencion-fotografias-30-dias"
+    status = "Enabled"
+
+    filter { prefix = "entradas/" }
+
+    expiration { days = 30 }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+
+  }
+
+  rule {
+    id     = "limpiar-delete-markers-fotografias"
+    status = "Enabled"
+    filter { prefix = "entradas/" }
+    expiration { expired_object_delete_marker = true }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.multimedia]
+}
+
 resource "aws_s3_bucket_cors_configuration" "multimedia" {
   bucket = aws_s3_bucket.multimedia.id
 
   cors_rule {
     allowed_headers = ["*"]
-    allowed_methods = ["GET", "PUT", "POST"]
-    allowed_origins = ["https://${aws_cloudfront_distribution.frontend.domain_name}"]
+    allowed_methods = ["PUT"]
+    allowed_origins = [var.modo_academy ? "http://${aws_s3_bucket_website_configuration.frontend_academy[0].website_endpoint}" : "https://${aws_cloudfront_distribution.frontend[0].domain_name}"]
     max_age_seconds = 3000
   }
+}
+
+# Cola y DLQ son bulkheads propios del procesamiento fotográfico. La activación
+# del evento permanece bloqueada por defecto hasta aprobar la política de retención.
+resource "aws_sqs_queue" "fotografias_dlq" {
+  name                      = "${local.prefijo}-fotografias-dlq"
+  message_retention_seconds = 1209600
+  sqs_managed_sse_enabled   = true
+  tags                      = local.tags
+}
+
+resource "aws_sqs_queue" "fotografias" {
+  name                       = "${local.prefijo}-fotografias"
+  visibility_timeout_seconds = 180
+  message_retention_seconds  = 345600
+  receive_wait_time_seconds  = 20
+  sqs_managed_sse_enabled    = true
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.fotografias_dlq.arn
+    maxReceiveCount     = 4
+  })
+  tags = local.tags
+}
+
+resource "aws_sqs_queue_policy" "fotografias" {
+  queue_url = aws_sqs_queue.fotografias.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "S3SoloBucketMultimedia", Effect = "Allow",
+      Principal = { Service = "s3.amazonaws.com" }, Action = "sqs:SendMessage",
+      Resource  = aws_sqs_queue.fotografias.arn,
+      Condition = {
+        ArnEquals    = { "aws:SourceArn" = aws_s3_bucket.multimedia.arn }
+        StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.actual.account_id }
+      }
+    }]
+  })
+}
+
+resource "aws_s3_bucket_notification" "fotografias" {
+  count  = var.habilitar_cargas_fotografias ? 1 : 0
+  bucket = aws_s3_bucket.multimedia.id
+  queue {
+    queue_arn     = aws_sqs_queue.fotografias.arn
+    events        = ["s3:ObjectCreated:Put"]
+    filter_prefix = "entradas/"
+  }
+  depends_on = [aws_sqs_queue_policy.fotografias]
+}
+
+resource "aws_cloudwatch_metric_alarm" "fotografias_dlq" {
+  alarm_name          = "${local.prefijo}-fotografias-dlq-visible"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  dimensions          = { QueueName = aws_sqs_queue.fotografias_dlq.name }
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  alarm_description   = "Existen fotografías que agotaron sus reintentos"
+  treat_missing_data  = "notBreaching"
+}
+
+resource "aws_cloudwatch_metric_alarm" "fotografias_antiguedad" {
+  alarm_name          = "${local.prefijo}-fotografias-antiguedad"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateAgeOfOldestMessage"
+  dimensions          = { QueueName = aws_sqs_queue.fotografias.name }
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 2
+  threshold           = 300
+  comparison_operator = "GreaterThanThreshold"
+  alarm_description   = "La cola fotográfica no está drenando a tiempo"
+  treat_missing_data  = "notBreaching"
 }
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -273,13 +429,13 @@ resource "aws_athena_workgroup" "mision_emprende" {
 # Outputs
 # ════════════════════════════════════════════════════════════════════════════
 output "url_frontend" {
-  description = "URL HTTPS pública del frontend"
-  value       = "https://${aws_cloudfront_distribution.frontend.domain_name}"
+  description = "URL del frontend según modo productivo o AWS Academy"
+  value       = var.modo_academy ? "http://${aws_s3_bucket_website_configuration.frontend_academy[0].website_endpoint}" : "https://${aws_cloudfront_distribution.frontend[0].domain_name}"
 }
 
 output "id_cloudfront" {
   description = "ID de distribución para invalidaciones del despliegue"
-  value       = aws_cloudfront_distribution.frontend.id
+  value       = var.modo_academy ? "" : aws_cloudfront_distribution.frontend[0].id
 }
 
 output "nombre_bucket_frontend" {
@@ -305,4 +461,19 @@ output "nombre_tabla_dynamodb" {
 output "arn_tabla_dynamodb" {
   description = "ARN de la tabla DynamoDB"
   value       = aws_dynamodb_table.mision_emprende.arn
+}
+
+output "arn_cola_fotos" {
+  description = "ARN de la cola SQS de fotografías"
+  value       = aws_sqs_queue.fotografias.arn
+}
+
+output "arn_dlq_fotos" {
+  description = "ARN de la DLQ de fotografías"
+  value       = aws_sqs_queue.fotografias_dlq.arn
+}
+
+output "cargas_fotografias_habilitadas" {
+  description = "Gate de retención aplicado al evento S3→SQS"
+  value       = var.habilitar_cargas_fotografias
 }

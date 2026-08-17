@@ -474,8 +474,10 @@ export async function completarLego(
   entrada: {
     conFoto?: boolean;
     sinFoto?: boolean;
+    trabajoFotoId?: string;
   },
   repositorio: RepositorioFase3,
+  fotos?: { verificarProcesada(trabajoId: string, sesionId: string, grupoId: string): Promise<boolean> },
 ) {
   const { sesion } = await contexto(
     sesionId,
@@ -493,6 +495,7 @@ export async function completarLego(
 
   const conFoto = Boolean(entrada.conFoto);
   const sinFoto = Boolean(entrada.sinFoto);
+  const trabajoFotoId = String(entrada.trabajoFotoId || "").trim();
 
   if (!conFoto && !sinFoto) {
     throw new ErrorAplicacion(
@@ -501,6 +504,10 @@ export async function completarLego(
       "FOTO_REQUERIDA",
     );
   }
+  if (conFoto && (!trabajoFotoId || !fotos || !(await fotos.verificarProcesada(trabajoFotoId, sesionId, grupoId)))) {
+    throw new ErrorAplicacion("La fotografía todavía no está procesada", 409, "FOTO_NO_PROCESADA");
+  }
+  if (!conFoto && trabajoFotoId) throw new ErrorAplicacion("El trabajo fotográfico no corresponde", 400, "TRABAJO_FOTO_INVALIDO");
 
   const restantes = segundosRestantes(sesion);
 
@@ -520,6 +527,7 @@ export async function completarLego(
     grupoId,
     conFoto,
     sinFoto,
+    conFoto ? trabajoFotoId : undefined,
   );
 
   const grupos = await repositorio.listarGrupos(

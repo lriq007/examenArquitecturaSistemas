@@ -9,7 +9,7 @@
   "scripts": {
     "tipos": "tsc --noEmit",
     "pruebas": "vitest run",
-    "empaquetar:verificar": "rm -rf .verificacion && esbuild src/acceso/api.ts src/profesor/api.ts src/sesiones/api.ts src/fase1/api.ts src/fase2/api.ts src/fase3/api.ts src/fase4/api.ts src/fase5/api.ts src/analytics/api.ts --bundle --platform=node --target=node22 --format=cjs --outdir=.verificacion",
+    "empaquetar:verificar": "rm -rf .verificacion && esbuild src/acceso/api.ts src/profesor/api.ts src/sesiones/api.ts src/fase1/api.ts src/fase2/api.ts src/fase3/api.ts src/fase4/api.ts src/fase5/api.ts src/analytics/api.ts src/fotografias/api.ts src/fotografias/consumidor.ts src/fotografias/reconciliador.ts --bundle --platform=node --target=node22 --format=cjs --outdir=.verificacion",
     "verificar": "npm run tipos && npm run pruebas && npm run empaquetar:verificar && npm run sam:validar",
     "construir": "sam build",
     "local:base": "docker compose up -d",
@@ -24,7 +24,9 @@
     "@aws-sdk/client-athena": "^3.1107.0",
     "@aws-sdk/client-cognito-identity-provider": "^3.1111.0",
     "@aws-sdk/client-dynamodb": "^3.1085.0",
-    "@aws-sdk/lib-dynamodb": "^3.1085.0"
+    "@aws-sdk/client-s3": "^3.1111.0",
+    "@aws-sdk/lib-dynamodb": "^3.1085.0",
+    "@aws-sdk/s3-request-presigner": "^3.1111.0"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.162",

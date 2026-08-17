@@ -19,6 +19,7 @@ if (exigirAccesoProfesor()) {
 
     cargarControl();
     intervalo = setInterval(cargarControl, 5000);
+    document.getElementById("btnReintentarFoto").addEventListener("click", reintentarFoto);
   }
 
   function formatoTiempo(segundos) {
@@ -139,6 +140,9 @@ if (exigirAccesoProfesor()) {
         `,
       )
       .join("");
+
+    const selector = document.getElementById("trabajoFotoId");
+    selector.innerHTML = '<option value="">Selecciona un grupo con fotografía</option>' + grupos.filter((g) => g.trabajoFotoId).map((g) => `<option value="${g.trabajoFotoId}">${g.nombreGrupo} · ${g.trabajoFotoId}</option>`).join("");
   }
 
   async function cargarControl() {
@@ -182,6 +186,26 @@ if (exigirAccesoProfesor()) {
       contenedor.textContent = error.message;
       contenedor.classList.add("visible");
     }
+  }
+
+  async function reintentarFoto() {
+    const trabajoId = document.getElementById("trabajoFotoId").value;
+    const archivo = document.getElementById("archivoReintentoFoto").files?.[0];
+    const estado = document.getElementById("estadoReintentoFoto");
+    if (!trabajoId) { estado.textContent = "Selecciona un grupo con fotografía fallida."; return; }
+    if (!archivo || !["image/jpeg", "image/png"].includes(archivo.type) || archivo.size <= 0 || archivo.size > 25 * 1024 * 1024) { estado.textContent = "Selecciona JPEG/PNG de hasta 25 MB."; return; }
+    try {
+      const resultado = await reintentarFotografiaProfesor(trabajoId, sesionId, archivo);
+      await cargarFotografiaFirmada(resultado.urlCarga, archivo);
+      estado.textContent = `Fotografía recibida; siguiendo trabajo ${trabajoId}…`;
+      for (let i = 0; i < 10; i += 1) {
+        await new Promise((resolver) => setTimeout(resolver, 1500));
+        const seguimiento = await consultarFotografiaProfesor(trabajoId, sesionId);
+        estado.textContent = `${trabajoId}: ${seguimiento.estado}`;
+        if (seguimiento.estado === "PROCESADA" || seguimiento.estado === "FALLIDA") return;
+      }
+      estado.textContent = `${trabajoId}: RECIBIDA; continúa visible para seguimiento.`;
+    } catch (error) { estado.textContent = error.message; }
   }
 
   window.addEventListener("beforeunload", () => {

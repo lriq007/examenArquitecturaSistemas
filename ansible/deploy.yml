@@ -22,20 +22,52 @@
     entorno: "prod"
     region: "us-east-1"
     nombre_tabla: "MisionEmprende-prod"
+    modo_academy: false
     directorio_backend: "{{ playbook_dir }}/../backend-serverless"
     directorio_frontend: "{{ playbook_dir }}/../frontend"
+    directorio_terraform: "{{ playbook_dir }}/.."
 
   pre_tasks:
-    - name: Exigir origen CORS HTTPS
+    - name: Exigir origen CORS coherente con el modo
       assert:
         that:
           - origen_cors is defined
-          - origen_cors is match('^https://')
-          - url_frontend is defined
-          - url_frontend is match('^https://')
-          - bucket_datalake is defined
-          - (origen_cors | regex_replace('/+$', '')) == (url_frontend | regex_replace('/+$', ''))
-        fail_msg: "Define origen_cors con la URL HTTPS exacta del frontend."
+          - (modo_academy | bool and origen_cors is match('^http://')) or (not (modo_academy | bool) and origen_cors is match('^https://'))
+        fail_msg: "Define origen_cors con HTTP solo para Academy o HTTPS para productivo."
+
+    - name: Aprobar retención antes de cualquier mutación
+      assert:
+        that: not (habilitar_cargas_fotografias | default(false) | bool) or (politica_retencion_fotografias_aprobada | default(false) | bool)
+
+    - name: Instalar dependencias para gates previos
+      command: npm ci
+      args: { chdir: "{{ directorio_backend }}" }
+      changed_when: false
+
+    - name: Gate backend completo previo
+      command: npm run verificar
+      args: { chdir: "{{ directorio_backend }}" }
+      changed_when: false
+
+    - name: Gate build SAM previo
+      command: npm run sam:build
+      args: { chdir: "{{ directorio_backend }}" }
+      changed_when: false
+
+    - name: Gate formato Terraform previo
+      command: terraform fmt -check -recursive
+      args: { chdir: "{{ directorio_terraform }}" }
+      changed_when: false
+
+    - name: Inicializar y validar Terraform previo
+      shell: terraform init -backend=false && terraform validate
+      args: { chdir: "{{ directorio_terraform }}" }
+      changed_when: false
+
+    - name: Gate sintaxis del playbook sin recursión
+      command: ansible-playbook --syntax-check "{{ playbook_dir }}/deploy.yml" -i "{{ playbook_dir }}/inventory/hosts.yml"
+      environment: { ANSIBLE_LOCAL_TEMP: /tmp/ansible-local, ANSIBLE_REMOTE_TEMP: /tmp/ansible-remote }
+      changed_when: false
 
   tasks:
     # ──────────────────────────────────────────────────────────────
@@ -64,6 +96,49 @@
       register: aws_identity
       changed_when: false
 
+    - name: Inicializar Terraform sin backend remoto
+      command: terraform init -backend=false
+      args: { chdir: "{{ directorio_terraform }}" }
+      changed_when: false
+
+    - name: Aplicar infraestructura Terraform
+      command: >
+        terraform apply -auto-approve
+        -var entorno={{ entorno }}
+        -var nombre_tabla={{ nombre_tabla }}
+        -var habilitar_cargas_fotografias={{ habilitar_cargas_fotografias | default(false) | bool | lower }}
+        -var modo_academy={{ modo_academy | bool | lower }}
+      args: { chdir: "{{ directorio_terraform }}" }
+      changed_when: true
+
+    - name: Leer outputs obligatorios de Terraform
+      command: terraform output -json
+      args: { chdir: "{{ directorio_terraform }}" }
+      register: terraform_outputs
+      changed_when: false
+
+    - name: Conectar outputs Terraform con SAM y frontend
+      set_fact:
+        bucket_frontend: "{{ (terraform_outputs.stdout | from_json).nombre_bucket_frontend.value }}"
+        bucket_multimedia: "{{ (terraform_outputs.stdout | from_json).nombre_bucket_multimedia.value }}"
+        bucket_datalake: "{{ (terraform_outputs.stdout | from_json).nombre_bucket_datalake.value }}"
+        arn_cola_fotos: "{{ (terraform_outputs.stdout | from_json).arn_cola_fotos.value }}"
+        arn_dlq_fotos: "{{ (terraform_outputs.stdout | from_json).arn_dlq_fotos.value }}"
+        cargas_fotografias_habilitadas: "{{ (terraform_outputs.stdout | from_json).cargas_fotografias_habilitadas.value }}"
+        id_cloudfront: "{{ (terraform_outputs.stdout | from_json).id_cloudfront.value }}"
+        url_frontend: "{{ (terraform_outputs.stdout | from_json).url_frontend.value }}"
+
+    - name: Validar outputs y aprobación de retención
+      assert:
+        that:
+          - bucket_multimedia | length > 0
+          - arn_cola_fotos | length > 0
+          - arn_dlq_fotos | length > 0
+          - (modo_academy | bool and url_frontend is match('^http://')) or (not (modo_academy | bool) and url_frontend is match('^https://'))
+          - (origen_cors | regex_replace('/+$', '')) == (url_frontend | regex_replace('/+$', ''))
+          - not (cargas_fotografias_habilitadas | bool) or (politica_retencion_fotografias_aprobada | default(false) | bool)
+        fail_msg: "Faltan outputs Terraform o se intentó habilitar cargas sin política de retención aprobada."
+
     - name: Mostrar identidad AWS
       debug:
         msg: "Cuenta AWS: {{ aws_identity.stdout }}"
@@ -84,6 +159,12 @@
       register: sam_build_result
       changed_when: true
 
+    - name: Ejecutar gates de tipos, pruebas, empaquetado y SAM
+      command: npm run verificar
+      args:
+        chdir: "{{ directorio_backend }}"
+      changed_when: false
+
     - name: Mostrar resultado de sam build
       debug:
         msg: "{{ sam_build_result.stdout_lines[-3:] }}"
@@ -103,7 +184,13 @@
           "Entorno={{ entorno }}"
           "NombreTabla={{ nombre_tabla }}"
           "NombreBucketDatalake={{ bucket_datalake }}"
+          "BucketMultimedia={{ bucket_multimedia }}"
+          "ArnColaFotos={{ arn_cola_fotos }}"
+          "ArnDlqFotos={{ arn_dlq_fotos }}"
           "OrigenCors={{ origen_cors }}"
+          "OrigenCorsProductivoConfirmado={{ 'https://academy.invalid' if (modo_academy | bool) else origen_cors }}"
+          "ModoDespliegue={{ 'academy' if (modo_academy | bool) else 'productivo' }}"
+          "CargasFotografiasHabilitadas={{ cargas_fotografias_habilitadas | bool | lower }}"
       args:
         chdir: "{{ directorio_backend }}"
       register: sam_deploy_result
@@ -152,7 +239,6 @@
         regexp: "^(const|let|var)\\s+API_URL\\s*="
         line: "const API_URL = '{{ url_api_gateway }}';"
         create: false
-      ignore_errors: true
 
     - name: Verificar si existe api.js en compartido
       stat:
@@ -195,7 +281,7 @@
         --region us-east-1
       register: cf_invalidation
       changed_when: true
-      when: id_cloudfront is defined
+      when: id_cloudfront is defined and id_cloudfront | length > 0
 
     # ──────────────────────────────────────────────────────────────
     # 8. Verificación final
@@ -207,7 +293,6 @@
         status_code: [200, 401, 403]
         timeout: 15
       register: api_check
-      ignore_errors: true
 
     - name: Resultado de verificación de API
       debug:

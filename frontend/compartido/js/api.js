@@ -1,4 +1,4 @@
-const API_URL = localStorage.getItem("urlApi") || "";
+const API_URL = 'https://elqy506l4e.execute-api.us-east-1.amazonaws.com';
 
 async function llamarApi(ruta, opciones = {}) {
   const token = localStorage.getItem("tokenAcceso");
@@ -63,4 +63,35 @@ function cerrarSesionGrupo() {
   localStorage.removeItem("sesionId");
   localStorage.removeItem("codigoGrupo");
   localStorage.removeItem("grupoActual");
+}
+
+async function iniciarCargaFotografia(archivo) {
+  return llamarApi("/api/fotografias", {
+    method: "POST",
+    body: JSON.stringify({ mime: archivo.type, tamano: archivo.size }),
+  });
+}
+
+async function cargarFotografiaFirmada(urlCarga, archivo) {
+  const respuesta = await fetch(urlCarga, {
+    method: "PUT",
+    headers: { "Content-Type": archivo.type, "x-amz-server-side-encryption": "AES256" },
+    body: archivo,
+  });
+  if (!respuesta.ok) throw new Error("No fue posible entregar la fotografía de forma segura.");
+}
+
+function consultarFotografia(trabajoId) {
+  return llamarApi(`/api/fotografias/${encodeURIComponent(trabajoId)}`);
+}
+
+function consultarFotografiaProfesor(trabajoId, sesionId) {
+  return llamarApi(`/api/profesor/fotografias/${encodeURIComponent(trabajoId)}?sesionId=${encodeURIComponent(sesionId)}`);
+}
+
+function reintentarFotografiaProfesor(trabajoId, sesionId, archivo) {
+  return llamarApi(`/api/profesor/fotografias/${encodeURIComponent(trabajoId)}/reintento`, {
+    method: "POST",
+    body: JSON.stringify({ sesionId, mime: archivo.type, tamano: archivo.size }),
+  });
 }

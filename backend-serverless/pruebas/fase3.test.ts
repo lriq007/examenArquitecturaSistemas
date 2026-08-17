@@ -266,8 +266,9 @@ describe("Fase 3", () => {
       await completarLego(
         "s1",
         "g1",
-        { conFoto: true },
+        { conFoto: true, trabajoFotoId: "foto-g1" },
         estado.repositorio,
+        { verificarProcesada: async (id, sesion, grupo) => id === "foto-g1" && sesion === "s1" && grupo === "g1" },
       );
 
       await completarLego(
@@ -311,4 +312,14 @@ describe("Fase 3", () => {
       ).toBe(12);
     },
   );
+
+  it.each([
+    ["ownership cruzado", { conFoto: true, trabajoFotoId: "foto" }, async (): Promise<boolean> => false, "FOTO_NO_PROCESADA"],
+    ["trabajo no completado", { conFoto: true, trabajoFotoId: "foto" }, async (): Promise<boolean> => false, "FOTO_NO_PROCESADA"],
+    ["sin foto con id", { sinFoto: true, trabajoFotoId: "foto" }, async (): Promise<boolean> => true, "TRABAJO_FOTO_INVALIDO"],
+  ])("rechaza %s", async (_caso, entrada, verificarProcesada, codigo) => {
+    const estado = memoria("f3_lego"); estado.sesion.timerCorriendo = false;
+    await expect(completarLego("s1", "g1", entrada, estado.repositorio, { verificarProcesada })).rejects.toMatchObject({ codigo });
+    expect(estado.grupos[0]!.legoCompletado).toBe(false);
+  });
 });

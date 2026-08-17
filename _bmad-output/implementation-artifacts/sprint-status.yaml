@@ -1,0 +1,70 @@
+# generated: 08-16-2026 00:00
+# project: baseDatosAvanzadas-examen
+# Auditoría brownfield: `done` exige satisfacer la historia completa y sus criterios.
+# Código parcial sin valor de usuario completo no eleva el estado desde `backlog`.
+
+generated: 08-16-2026 00:00
+last_updated: 08-16-2026 23:25
+project: baseDatosAvanzadas-examen
+project_key: NOKEY
+tracking_system: file-system
+story_location: "_bmad-output/implementation-artifacts"
+
+development_status:
+  epic-1: in-progress
+  1-1-acceso-cognito-para-profesores: review
+  1-2-ownership-de-sesiones-por-identidad-docente: review
+  1-3-provisionamiento-de-identidades-de-grupo: review
+  1-4-ingreso-de-grupo-mediante-un-unico-codigo: review
+  1-5-proteccion-uniforme-por-rol-y-alcance: review
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-importacion-validada-de-nomina: backlog
+  2-2-distribucion-idempotente-de-estudiantes: backlog
+  2-3-panel-de-sesiones-propias: backlog
+  2-4-control-autoritativo-de-fases-y-temporizador: backlog
+  epic-2-retrospective: optional
+
+  epic-3: in-progress
+  3-1-navegacion-sincronizada-con-el-estado-autoritativo: done
+  3-2-recorrido-completo-de-fase-1: done
+  3-3-recorrido-completo-de-fase-2: backlog
+  3-4-recorrido-completo-de-fase-3: backlog
+  3-5-construccion-y-presentacion-del-pitch: backlog
+  3-6-evaluacion-de-pares-y-cierre: backlog
+  3-7-recompensas-idempotentes-en-todas-las-fases: backlog
+  epic-3-retrospective: optional
+
+  epic-4: done
+  4-1-inicio-directo-y-validado-de-carga-fotografica: done
+  4-2-aceptacion-despues-de-persistencia-y-encolado-durable: done
+  4-3-procesamiento-idempotente-de-fotografias: done
+  4-4-fallos-terminales-dlq-y-redrive-autorizado: done
+  4-5-seguimiento-comprensible-del-trabajo-fotografico: done
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-dashboard-autorizado-de-kpis: backlog
+  5-2-evolucion-contractual-de-un-kpi: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-failover-mediante-circuit-breaker-observable: backlog
+  6-2-aislamiento-por-clase-de-carga: backlog
+  6-3-observabilidad-correlacionada-y-alertas-operables: backlog
+  6-4-experimento-automatizado-de-indisponibilidad-regional: backlog
+  6-5-experimento-automatizado-del-consumidor-fotografico: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-pruebas-de-limites-hexagonales: backlog
+  7-2-pruebas-estructurales-de-contratos-desplegables: backlog
+  7-3-integracion-continua-con-gates-obligatorios: backlog
+  7-4-despliegue-productivo-protegido-con-oidc: backlog
+  7-5-smoke-test-y-recuperacion-del-despliegue: backlog
+  7-6-demostracion-de-bloqueo-y-promocion-corregida: backlog
+  7-7-seguridad-y-compatibilidad-del-entorno-web: backlog
+  epic-7-retrospective: optional
+
+action_items: []

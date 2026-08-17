@@ -9,6 +9,7 @@ import {
   respuestaJson,
 } from "../compartido/respuestas.js";
 import { contextoGrupoDesdeEvento } from "../compartido/alcance.js";
+import { RepositorioFotografiasDynamo } from "../fotografias/repositorio.js";
 import {
   repositorioFase3,
 } from "./repositorio.js";
@@ -25,6 +26,9 @@ import type {
   EtapaListaFase3,
 } from "./servicio.js";
 
+const repositorioFotos = new RepositorioFotografiasDynamo();
+const consultaFotos = { verificarProcesada: async (trabajoId: string, sesionId: string, grupoId: string) => { const foto = await repositorioFotos.obtener(trabajoId); return foto?.sesionId === sesionId && foto.grupoId === grupoId && foto.estado === "COMPLETADO"; } };
+
 interface ListoEntrada {
   etapa: EtapaListaFase3;
 }
@@ -32,6 +36,7 @@ interface ListoEntrada {
 interface LegoEntrada {
   conFoto?: boolean;
   sinFoto?: boolean;
+  trabajoFotoId?: string;
 }
 
 interface AstronautaEntrada {
@@ -111,6 +116,7 @@ export async function manejador(
           grupoId,
           entrada,
           repositorioFase3,
+          consultaFotos,
         ),
       );
     }
