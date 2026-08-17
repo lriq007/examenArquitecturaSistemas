@@ -11,6 +11,11 @@ import {
   DynamoDBDocumentClient,
 } from "@aws-sdk/lib-dynamodb";
 
+import {
+  construirItemGrupoAnalitico,
+  construirItemSesionAnalitica,
+} from "../src/compartido/contratos/analytics.js";
+
 const nombreTabla = process.env.NOMBRE_TABLA || "MisionEmprende-local";
 const endpoint = process.env.DYNAMODB_ENDPOINT_LOCAL || "http://localhost:8000";
 
@@ -93,16 +98,18 @@ async function cargarDatos(): Promise<void> {
               Item: {
                 PK: "SESION#1",
                 SK: "METADATOS",
-                tipo: "SESION",
-                sesionId: "1",
+                ...construirItemSesionAnalitica({
+                  sesionId: "1",
+                  fase: "f1_sopa",
+                  totalGrupos: 2,
+                  totalAlumnos: 6,
+                  fechaCreacion: ahora,
+                }),
                 nombre: "Sesión de prueba",
-                fase: "f1_sopa",
-                totalGrupos: 2,
                 gruposSopaCompletada: 0,
                 timerCorriendo: true,
                 segundosRestantes: 120,
                 timerInicio: ahora,
-                fechaCreacion: ahora,
               },
             },
           },
@@ -113,13 +120,15 @@ async function cargarDatos(): Promise<void> {
                 SK: "GRUPO#1",
                 GSI1PK: "CODIGO#ABC123",
                 GSI1SK: "GRUPO#1",
-                tipo: "GRUPO",
-                sesionId: "1",
-                grupoId: "1",
-                nombreGrupo: "Código Naranja",
+                ...construirItemGrupoAnalitico({
+                  sesionId: "1",
+                  grupoId: "1",
+                  nombreGrupo: "Código Naranja",
+                  tokens: 10,
+                  sopaCompletada: false,
+                  legoCompletado: false,
+                }),
                 codigoAcceso: "ABC123",
-                tokens: 10,
-                sopaCompletada: false,
               },
             },
           },
@@ -130,13 +139,15 @@ async function cargarDatos(): Promise<void> {
                 SK: "GRUPO#2",
                 GSI1PK: "CODIGO#XYZ789",
                 GSI1SK: "GRUPO#2",
-                tipo: "GRUPO",
-                sesionId: "1",
-                grupoId: "2",
-                nombreGrupo: "Los Innovadores",
+                ...construirItemGrupoAnalitico({
+                  sesionId: "1",
+                  grupoId: "2",
+                  nombreGrupo: "Los Innovadores",
+                  tokens: 10,
+                  sopaCompletada: false,
+                  legoCompletado: false,
+                }),
                 codigoAcceso: "XYZ789",
-                tokens: 10,
-                sopaCompletada: false,
               },
             },
           },

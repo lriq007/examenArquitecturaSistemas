@@ -103,8 +103,17 @@ describe("Profesor y ownership", () => {
     const memoria = repositorioEnMemoria();
     const resultado = await crearSesiones(entrada(17), "sub-profesor-a", memoria.repositorio);
     expect(resultado.sesiones[0]!.grupos).toHaveLength(3);
-    expect(memoria.items.find((item) => item.tipo === "SESION")?.profesorSub).toBe("sub-profesor-a");
-    expect(memoria.items.filter((item) => item.tipo === "GRUPO").every((item) => item.estadoProvisionamiento === "LISTO")).toBe(true);
+    const itemSesion = memoria.items.find((item) => item.tipo === "SESION");
+    expect(itemSesion?.profesorSub).toBe("sub-profesor-a");
+    expect(itemSesion).toMatchObject({
+      schemaVersion: "1.0",
+      fase: "f1_bienvenida",
+      totalGrupos: 3,
+      totalAlumnos: 17,
+    });
+    const itemsGrupo = memoria.items.filter((item) => item.tipo === "GRUPO");
+    expect(itemsGrupo.every((item) => item.estadoProvisionamiento === "LISTO")).toBe(true);
+    expect(itemsGrupo.every((item) => item.schemaVersion === "1.0")).toBe(true);
   });
 
   it("niega lectura y mutación cruzada y también históricos sin owner", async () => {
@@ -127,8 +136,9 @@ describe("Profesor y ownership", () => {
     expect(memoria.codigosReservados).toHaveLength(2);
     expect(memoria.codigosReservados[1]).not.toBe(memoria.codigosReservados[0]);
     expect(resultado.sesiones[0]!.grupos[0]!.codigoAcceso).toBe(memoria.codigosReservados[1]);
-    expect(memoria.items.find((item) => item.tipo === "GRUPO")?.codigoAcceso)
-      .toBe(memoria.codigosReservados[1]);
+    const itemGrupo = memoria.items.find((item) => item.tipo === "GRUPO");
+    expect(itemGrupo?.codigoAcceso).toBe(memoria.codigosReservados[1]);
+    expect(itemGrupo).toMatchObject({ schemaVersion: "1.0" });
   });
 
   it.each([

@@ -2,6 +2,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS mision_emprende_db.mision_raw (
     pk STRING,
     sk STRING,
     tipo STRING,
+    schema_version STRING,
 
     sesion_id STRING,
     grupo_id STRING,
@@ -39,6 +40,7 @@ WITH SERDEPROPERTIES (
     'ion.pk.path_extractor' = '(Item PK)',
     'ion.sk.path_extractor' = '(Item SK)',
     'ion.tipo.path_extractor' = '(Item tipo)',
+    'ion.schema_version.path_extractor' = '(Item schemaVersion)',
 
     'ion.sesion_id.path_extractor' = '(Item sesionId)',
     'ion.grupo_id.path_extractor' = '(Item grupoId)',

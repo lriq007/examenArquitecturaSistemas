@@ -6,6 +6,7 @@ import {
 } from "@aws-sdk/client-athena";
 
 import { ErrorAplicacion } from "../compartido/respuestas.js";
+import { mapearFilaKpis } from "../compartido/contratos/analytics.js";
 
 const athena = new AthenaClient({});
 
@@ -16,15 +17,6 @@ const WORKGROUP = process.env.ATHENA_WORKGROUP;
 
 function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function numeroONull(valor: string | undefined): number | null {
-  if (valor === undefined || valor === "") {
-    return null;
-  }
-
-  const numero = Number(valor);
-  return Number.isFinite(numero) ? numero : null;
 }
 
 async function esperarConsulta(
@@ -78,6 +70,7 @@ export async function obtenerKpisSesion(
   const sql = `
     SELECT
       sesion_id,
+      schema_version,
       total_alumnos,
       grupos_configurados,
       grupos_en_datos,
@@ -152,54 +145,5 @@ export async function obtenerKpisSesion(
     }
   });
 
-  return {
-    ok: true,
-    sesionId: datos.sesion_id || sesionId,
-
-    totalAlumnos:
-      numeroONull(datos.total_alumnos) ?? 0,
-
-    totalGrupos:
-      numeroONull(datos.grupos_configurados) ?? 0,
-
-    gruposEnDatos:
-      numeroONull(datos.grupos_en_datos) ?? 0,
-
-    promedioTokens:
-      numeroONull(datos.promedio_tokens),
-
-    porcentajeSopa:
-      numeroONull(datos.porcentaje_sopa_completada),
-
-    tiempoPromedioSopa:
-      numeroONull(datos.tiempo_promedio_sopa_segundos),
-
-    porcentajeLego:
-      numeroONull(datos.porcentaje_lego_completado),
-
-    promedioIntentosRuleta:
-      numeroONull(datos.promedio_intentos_ruleta),
-
-    porcentajeAstronauta:
-      numeroONull(datos.porcentaje_astronauta_correcto),
-
-    totalEvaluaciones:
-      numeroONull(datos.total_evaluaciones) ?? 0,
-
-    promedioPeer:
-      numeroONull(datos.promedio_peer),
-
-    criteriosPeer: {
-      claridad:
-        numeroONull(datos.promedio_claridad),
-      creatividad:
-        numeroONull(datos.promedio_creatividad),
-      viabilidad:
-        numeroONull(datos.promedio_viabilidad),
-      equipo:
-        numeroONull(datos.promedio_equipo),
-      presentacion:
-        numeroONull(datos.promedio_presentacion),
-    },
-  };
+  return mapearFilaKpis(datos, sesionId);
 }

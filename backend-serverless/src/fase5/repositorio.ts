@@ -10,6 +10,7 @@ import {
   baseDatos,
   nombreTabla,
 } from "../compartido/baseDatos.js";
+import { construirCamposEvaluacionAnalitica } from "../compartido/contratos/analytics.js";
 
 export interface CriteriosEvaluacion {
   claridad: number;
@@ -124,6 +125,17 @@ export const repositorioFase5: RepositorioFase5 = {
   },
 
   async crearEvaluacion(sesionId, evaluacion) {
+    const campos = construirCamposEvaluacionAnalitica({
+      grupoEvaluadoId: evaluacion.grupoEvaluadoId,
+      grupoEvaluadorId: evaluacion.grupoEvaluadorId,
+      claridad: evaluacion.claridad,
+      creatividad: evaluacion.creatividad,
+      viabilidad: evaluacion.viabilidad,
+      equipo: evaluacion.equipo,
+      presentacion: evaluacion.presentacion,
+      automatica: evaluacion.automatica,
+    });
+
     try {
       await baseDatos.send(
         new UpdateCommand({
@@ -138,19 +150,21 @@ export const repositorioFase5: RepositorioFase5 = {
             "claridad = :claridad, creatividad = :creatividad, " +
             "viabilidad = :viabilidad, equipo = :equipo, " +
             "presentacion = :presentacion, comentario = :comentario, " +
-            "reflexion = :reflexion, automatica = :automatica",
+            "reflexion = :reflexion, automatica = :automatica, " +
+            "schemaVersion = :schemaVersion",
           ConditionExpression: "attribute_not_exists(PK)",
           ExpressionAttributeValues: {
-            ":evaluado": evaluacion.grupoEvaluadoId,
-            ":evaluador": evaluacion.grupoEvaluadorId,
-            ":claridad": evaluacion.claridad,
-            ":creatividad": evaluacion.creatividad,
-            ":viabilidad": evaluacion.viabilidad,
-            ":equipo": evaluacion.equipo,
-            ":presentacion": evaluacion.presentacion,
+            ":evaluado": campos.grupoEvaluadoId,
+            ":evaluador": campos.grupoEvaluadorId,
+            ":claridad": campos.claridad,
+            ":creatividad": campos.creatividad,
+            ":viabilidad": campos.viabilidad,
+            ":equipo": campos.equipo,
+            ":presentacion": campos.presentacion,
             ":comentario": evaluacion.comentario,
             ":reflexion": evaluacion.reflexion,
-            ":automatica": evaluacion.automatica,
+            ":automatica": campos.automatica,
+            ":schemaVersion": campos.schemaVersion,
           },
         }),
       );

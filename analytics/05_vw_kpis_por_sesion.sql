@@ -69,6 +69,7 @@ evaluaciones AS (
 
 SELECT
     s.sesion_id,
+    s.schema_version AS schema_version,
     s.fecha_creacion,
     s.fase,
     s.total_alumnos,

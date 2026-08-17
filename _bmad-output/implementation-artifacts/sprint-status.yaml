@@ -4,7 +4,7 @@
 # Código parcial sin valor de usuario completo no eleva el estado desde `backlog`.
 
 generated: 08-16-2026 00:00
-last_updated: 08-16-2026 23:25
+last_updated: 08-17-2026 02:00
 project: baseDatosAvanzadas-examen
 project_key: NOKEY
 tracking_system: file-system
@@ -44,9 +44,9 @@ development_status:
   4-5-seguimiento-comprensible-del-trabajo-fotografico: done
   epic-4-retrospective: optional
 
-  epic-5: backlog
-  5-1-dashboard-autorizado-de-kpis: backlog
-  5-2-evolucion-contractual-de-un-kpi: backlog
+  epic-5: done
+  5-1-dashboard-autorizado-de-kpis: done
+  5-2-evolucion-contractual-de-un-kpi: done
   epic-5-retrospective: optional
 
   epic-6: done

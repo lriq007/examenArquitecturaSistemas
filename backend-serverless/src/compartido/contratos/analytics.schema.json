@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "analytics.contrato.v1.json",
+  "$defs": {
+    "itemSesionAnalitica": {
+      "type": "object",
+      "required": ["tipo", "schemaVersion", "sesionId", "fase", "totalGrupos", "totalAlumnos", "fechaCreacion"],
+      "properties": {
+        "tipo": { "const": "SESION" },
+        "schemaVersion": { "const": "1.0" },
+        "sesionId": { "type": "string", "minLength": 1 },
+        "fase": { "type": "string", "minLength": 1 },
+        "totalGrupos": { "type": "integer", "minimum": 0 },
+        "totalAlumnos": { "type": "integer", "minimum": 0 },
+        "fechaCreacion": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": true
+    },
+    "itemGrupoAnalitico": {
+      "type": "object",
+      "required": ["tipo", "schemaVersion", "sesionId", "grupoId", "nombreGrupo", "tokens", "sopaCompletada", "legoCompletado"],
+      "properties": {
+        "tipo": { "const": "GRUPO" },
+        "schemaVersion": { "const": "1.0" },
+        "sesionId": { "type": "string", "minLength": 1 },
+        "grupoId": { "type": "string", "minLength": 1 },
+        "nombreGrupo": { "type": "string" },
+        "tokens": { "type": "number" },
+        "sopaCompletada": { "type": "boolean" },
+        "legoCompletado": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "camposEvaluacionAnalitica": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "grupoEvaluadoId",
+        "grupoEvaluadorId",
+        "claridad",
+        "creatividad",
+        "viabilidad",
+        "equipo",
+        "presentacion",
+        "automatica"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "1.0" },
+        "grupoEvaluadoId": { "type": "string", "minLength": 1 },
+        "grupoEvaluadorId": { "type": "string", "minLength": 1 },
+        "claridad": { "type": "number" },
+        "creatividad": { "type": "number" },
+        "viabilidad": { "type": "number" },
+        "equipo": { "type": "number" },
+        "presentacion": { "type": "number" },
+        "automatica": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "dtoKpisSesion": {
+      "type": "object",
+      "required": [
+        "ok",
+        "sesionId",
+        "schemaVersion",
+        "verificado",
+        "verificadoEn",
+        "totalAlumnos",
+        "totalGrupos",
+        "gruposEnDatos",
+        "totalEvaluaciones",
+        "criteriosPeer"
+      ],
+      "properties": {
+        "ok": { "const": true },
+        "sesionId": { "type": "string", "minLength": 1 },
+        "schemaVersion": { "type": "string", "minLength": 1 },
+        "verificado": { "const": true },
+        "verificadoEn": { "type": "string", "format": "date-time" },
+        "totalAlumnos": { "type": "integer" },
+        "totalGrupos": { "type": "integer" },
+        "gruposEnDatos": { "type": "integer" },
+        "promedioTokens": { "type": ["number", "null"] },
+        "porcentajeSopa": { "type": ["number", "null"] },
+        "tiempoPromedioSopa": { "type": ["number", "null"] },
+        "porcentajeLego": { "type": ["number", "null"] },
+        "promedioIntentosRuleta": { "type": ["number", "null"] },
+        "porcentajeAstronauta": { "type": ["number", "null"] },
+        "totalEvaluaciones": { "type": "integer" },
+        "promedioPeer": { "type": ["number", "null"] },
+        "criteriosPeer": {
+          "type": "object",
+          "properties": {
+            "claridad": { "type": ["number", "null"] },
+            "creatividad": { "type": ["number", "null"] },
+            "viabilidad": { "type": ["number", "null"] },
+            "equipo": { "type": ["number", "null"] },
+            "presentacion": { "type": ["number", "null"] }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

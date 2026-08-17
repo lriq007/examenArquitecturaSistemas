@@ -3,6 +3,7 @@ SELECT
     sesion_id,
     grupo_id,
     nombre_grupo,
+    schema_version,
     CAST(tokens AS DOUBLE) AS tokens,
 
     COALESCE(sopa_completada, false) AS sopa_completada,

@@ -59,6 +59,6 @@ export async function manejador(
       error: "Ruta no encontrada",
     });
   } catch (error) {
-    return responderError(error);
+    return responderError(error, event);
   }
 }

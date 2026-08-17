@@ -3,6 +3,7 @@ SELECT
     REPLACE(pk, 'SESION#', '') AS sesion_id,
     grupo_evaluado_id,
     grupo_evaluador_id,
+    schema_version,
 
     CAST(claridad AS DOUBLE) AS claridad,
     CAST(creatividad AS DOUBLE) AS creatividad,

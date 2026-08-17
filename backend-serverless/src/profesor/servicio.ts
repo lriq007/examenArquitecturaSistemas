@@ -12,6 +12,10 @@ import {
   crearIdentidadGrupo,
   ingresarProfesorCognito,
 } from "../compartido/cognito.js";
+import {
+  construirItemGrupoAnalitico,
+  construirItemSesionAnalitica,
+} from "../compartido/contratos/analytics.js";
 import type {
   AlumnoEntrada,
   ItemDynamo,
@@ -349,21 +353,22 @@ export async function crearSesiones(
         GSI1PK: `PROFESOR_SUB#${profesorSub}`,
         profesorSub,
         GSI1SK: `SESION#${ahora}#${sesionId}`,
-        tipo: "SESION",
-        sesionId,
+        ...construirItemSesionAnalitica({
+          sesionId,
+          fase: "f1_bienvenida",
+          totalGrupos: grupos.length,
+          totalAlumnos: alumnosSesion.length,
+          fechaCreacion: ahora,
+        }),
         nombre: nombreSesion,
         correoProfesor,
         facultad,
-        fase: "f1_bienvenida",
-        totalGrupos: grupos.length,
-        totalAlumnos: alumnosSesion.length,
         gruposSopaCompletada: 0,
         timerCorriendo: false,
         segundosRestantes: 0,
         timerInicio: null,
         timerFin: null,
         inicioFaseHabilitado: false,
-        fechaCreacion: ahora,
       });
 
       grupos.forEach((grupo) => {
@@ -372,13 +377,15 @@ export async function crearSesiones(
           SK: `GRUPO#${grupo.grupoId}`,
           GSI1PK: `CODIGO#${grupo.codigoAcceso}`,
           GSI1SK: `GRUPO#${grupo.grupoId}`,
-          tipo: "GRUPO",
-          sesionId,
-          grupoId: grupo.grupoId,
-          nombreGrupo: grupo.nombreGrupo,
+          ...construirItemGrupoAnalitico({
+            sesionId,
+            grupoId: grupo.grupoId,
+            nombreGrupo: grupo.nombreGrupo,
+            tokens: 10,
+            sopaCompletada: false,
+            legoCompletado: false,
+          }),
           codigoAcceso: grupo.codigoAcceso,
-          tokens: 10,
-          sopaCompletada: false,
           listoF1: false,
           listoF2: false,
           listoF3: false,
@@ -387,7 +394,6 @@ export async function crearSesiones(
           listoF6: false,
           temaElegido: "",
           desafioNombre: "",
-          legoCompletado: false,
           pitchCompletado: false,
           estadoProvisionamiento: "PENDIENTE",
         });

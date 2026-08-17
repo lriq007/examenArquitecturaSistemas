@@ -228,10 +228,26 @@ if (exigirAccesoProfesor()) {
 
     renderPeer(resultado.criteriosPeer);
 
+    document.getElementById(
+      "verificadoEn",
+    ).textContent =
+      resultado.verificadoEn
+        ? `(${new Date(
+            resultado.verificadoEn,
+          ).toLocaleString("es-CL", {
+            dateStyle: "short",
+            timeStyle: "short",
+          })})`
+        : "";
+
     contenido.hidden = false;
   }
 
   async function cargarKpis() {
+    // Nunca se mezcla un resultado previo con un error: el
+    // contenido permanece oculto hasta confirmar un KPI actual.
+    contenido.hidden = true;
+
     try {
       mensaje.className = "mensaje";
       mensaje.textContent = "";
@@ -245,6 +261,7 @@ if (exigirAccesoProfesor()) {
 
       render(resultado);
     } catch (error) {
+      contenido.hidden = true;
       mensaje.textContent = error.message;
       mensaje.className =
         "mensaje visible error";
