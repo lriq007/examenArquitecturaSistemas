@@ -125,7 +125,7 @@ jobs:
               ArnDlqFotos="${ARN_DLQ_FOTOS}" \
               ArnTemaAlarmas="${ARN_TEMA_ALARMAS}" \
               OrigenCors="${URL_FRONTEND}" \
-              ModoDespliegue=productivo
+              ModoDespliegue=academy
 
       - name: 12. Capturar URL de API Gateway
         working-directory: backend-serverless
