@@ -1,4 +1,4 @@
-import { crearToken } from "../compartido/seguridad.js";
+import { claveTecnicaGrupo, tokenGrupo } from "../compartido/cognito.js";
 import { ErrorAplicacion } from "../compartido/respuestas.js";
 import type { RepositorioAcceso } from "./repositorio.js";
 
@@ -37,9 +37,17 @@ export async function ingresarConCodigo(
   if (!grupo) {
     throw new ErrorAplicacion(
       "Código de grupo inválido",
-      404,
-      "GRUPO_NO_ENCONTRADO",
+      401,
+      "INGRESO_INVALIDO",
     );
+  }
+
+  if (
+    grupo.estadoProvisionamiento !== "LISTO" ||
+    !grupo.cognitoUsername ||
+    !grupo.grupoSub
+  ) {
+    throw new ErrorAplicacion("Código de grupo inválido", 401, "INGRESO_INVALIDO");
   }
 
   const nombreLimpio = nombreRecibido.trim().slice(0, 100);
@@ -59,10 +67,10 @@ export async function ingresarConCodigo(
     nombreGrupo,
   );
 
-  const token = crearToken({
-    sesionId: grupo.sesionId,
-    grupoId: grupo.grupoId,
-  });
+  const token = await tokenGrupo(
+    grupo.cognitoUsername,
+    claveTecnicaGrupo(grupo.codigoAcceso, grupo.grupoId),
+  );
 
   return {
     ok: true,

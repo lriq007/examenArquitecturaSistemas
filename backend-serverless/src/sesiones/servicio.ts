@@ -2,10 +2,14 @@ import { ErrorAplicacion } from "../compartido/respuestas.js";
 import type { RepositorioSesiones } from "./repositorio.js";
 
 export async function obtenerSesionActual(
-  sesionId: string,
-  grupoId: string,
+  grupoSub: string,
   repositorio: RepositorioSesiones,
 ) {
+  const vinculo = await repositorio.buscarVinculoGrupo(grupoSub);
+  if (!vinculo) {
+    throw new ErrorAplicacion("Acceso no autorizado", 403, "ALCANCE_INVALIDO");
+  }
+  const { sesionId, grupoId } = vinculo;
   const [sesion, grupo] = await Promise.all([
     repositorio.buscarSesion(sesionId),
     repositorio.buscarGrupo(sesionId, grupoId),

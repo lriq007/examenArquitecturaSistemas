@@ -12,6 +12,9 @@ export interface GrupoAcceso {
   grupoId: string;
   nombreGrupo: string;
   codigoAcceso: string;
+  cognitoUsername: string;
+  grupoSub: string;
+  estadoProvisionamiento: string;
 }
 
 export interface RepositorioAcceso {
@@ -25,7 +28,8 @@ export interface RepositorioAcceso {
 
 export const repositorioAcceso: RepositorioAcceso = {
   async buscarPorCodigo(codigo: string): Promise<GrupoAcceso | null> {
-    const resultado = await baseDatos.send(
+    for (let intento = 0; intento < 3; intento += 1) {
+      const resultado = await baseDatos.send(
       new QueryCommand({
         TableName: nombreTabla(),
         IndexName: "GSI1",
@@ -37,16 +41,26 @@ export const repositorioAcceso: RepositorioAcceso = {
       }),
     );
 
-    const item = resultado.Items?.[0];
+      const item = resultado.Items?.[0];
 
-    if (!item) return null;
+      if (!item) {
+        if (intento < 2) await new Promise((resolver) => setTimeout(resolver, 40 * 2 ** intento));
+        continue;
+      }
 
-    return {
+      const grupo = {
       sesionId: String(item.sesionId),
       grupoId: String(item.grupoId),
       nombreGrupo: String(item.nombreGrupo || "Grupo"),
       codigoAcceso: String(item.codigoAcceso),
-    };
+      cognitoUsername: String(item.cognitoUsername || ""),
+      grupoSub: String(item.grupoSub || ""),
+      estadoProvisionamiento: String(item.estadoProvisionamiento || ""),
+      };
+      if (!grupo.sesionId || !grupo.grupoId || !grupo.grupoSub) return null;
+      return grupo;
+    }
+    return null;
   },
 
   async actualizarNombre(

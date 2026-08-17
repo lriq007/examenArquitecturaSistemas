@@ -47,6 +47,9 @@
     botonConfirmar.textContent = "VALIDANDO...";
 
     try {
+      const usuario = window.prompt("Correo institucional del profesor:");
+      if (!usuario) throw new Error("Debes ingresar tu correo institucional");
+
       const resultado = await fetch(
         `${String(API_URL).replace(/\/+$/, "")}/api/profesor/ingresar`,
         {
@@ -55,7 +58,8 @@
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            codigo: entrada.value,
+            usuario,
+            clave: entrada.value,
           }),
         },
       );
@@ -68,10 +72,34 @@
         );
       }
 
-      localStorage.setItem(
-        "tokenProfesor",
-        datos.token,
-      );
+      let autenticacion = datos;
+
+      if (datos.challenge === "NEW_PASSWORD_REQUIRED") {
+        const claveNueva = window.prompt(
+          "Debes reemplazar tu contraseña temporal. Ingresa una nueva contraseña segura:",
+        );
+        if (!claveNueva) throw new Error("Debes definir una nueva contraseña");
+
+        const respuestaChallenge = await fetch(
+          `${String(API_URL).replace(/\/+$/, "")}/api/profesor/ingresar`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              usuario,
+              claveNueva,
+              sesionChallenge: datos.sesionChallenge,
+            }),
+          },
+        );
+        autenticacion = await respuestaChallenge.json();
+        if (!respuestaChallenge.ok) {
+          throw new Error(autenticacion.error || "No fue posible completar el primer acceso");
+        }
+      }
+
+      if (!autenticacion.token) throw new Error("No fue posible iniciar sesión");
+      localStorage.setItem("tokenProfesor", autenticacion.token);
 
       if (typeof closeModal === "function") {
         closeModal();

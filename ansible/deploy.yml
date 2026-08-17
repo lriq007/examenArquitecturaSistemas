@@ -5,13 +5,14 @@
 # Variables requeridas (pasar con -e o definir en group_vars):
 #   url_api:         URL del API Gateway (obtenida del output de Terraform/SAM)
 #   bucket_frontend: Nombre del bucket S3 del frontend (output de Terraform)
+#   bucket_datalake: Nombre del bucket S3 de Athena (output de Terraform)
 #   id_cloudfront:   ID de la distribución CloudFront (output de Terraform)
+#   url_frontend:    URL HTTPS de CloudFront (output de Terraform)
 #
 # Variables opcionales:
 #   entorno:         "prod" (default)
 #   region:          "us-east-1" (default)
-#   clave_token:     Clave JWT para firmar tokens (default: cambiar en producción)
-#   clave_profesor:  Clave de acceso del profesor (default: profe123)
+#   origen_cors:     Origen HTTPS exacto del frontend.
 
 - name: Despliegue de Misión Emprende UDD
   hosts: localhost
@@ -21,10 +22,20 @@
     entorno: "prod"
     region: "us-east-1"
     nombre_tabla: "MisionEmprende-prod"
-    clave_token: "cambiar-antes-de-produccion"
-    clave_profesor: "profe123"
     directorio_backend: "{{ playbook_dir }}/../backend-serverless"
     directorio_frontend: "{{ playbook_dir }}/../frontend"
+
+  pre_tasks:
+    - name: Exigir origen CORS HTTPS
+      assert:
+        that:
+          - origen_cors is defined
+          - origen_cors is match('^https://')
+          - url_frontend is defined
+          - url_frontend is match('^https://')
+          - bucket_datalake is defined
+          - (origen_cors | regex_replace('/+$', '')) == (url_frontend | regex_replace('/+$', ''))
+        fail_msg: "Define origen_cors con la URL HTTPS exacta del frontend."
 
   tasks:
     # ──────────────────────────────────────────────────────────────
@@ -91,9 +102,8 @@
         --parameter-overrides
           "Entorno={{ entorno }}"
           "NombreTabla={{ nombre_tabla }}"
-          "ClaveToken={{ clave_token }}"
-          "ClaveAccesoProfesor={{ clave_profesor }}"
-          "OrigenCors={{ origen_cors | default('*') }}"
+          "NombreBucketDatalake={{ bucket_datalake }}"
+          "OrigenCors={{ origen_cors }}"
       args:
         chdir: "{{ directorio_backend }}"
       register: sam_deploy_result
@@ -222,5 +232,5 @@
           - " Región    : {{ region }}"
           - " Tabla DB  : {{ nombre_tabla }}"
           - " API URL   : {{ url_api_gateway }}"
-          - " Frontend  : https://{{ id_cloudfront | default('(sin CloudFront ID)') }}.cloudfront.net"
+          - " Frontend  : {{ url_frontend }}"
           - "══════════════════════════════════════════════"

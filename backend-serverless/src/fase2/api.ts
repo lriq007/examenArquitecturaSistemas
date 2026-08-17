@@ -8,9 +8,7 @@ import {
   responderError,
   respuestaJson,
 } from "../compartido/respuestas.js";
-import {
-  contextoDesdeEvento,
-} from "../compartido/seguridad.js";
+import { contextoGrupoDesdeEvento } from "../compartido/alcance.js";
 import type {
   BubbleMapDatos,
 } from "./repositorio.js";
@@ -45,7 +43,7 @@ export async function manejador(
 ): Promise<APIGatewayProxyResultV2> {
   try {
     const { sesionId, grupoId } =
-      contextoDesdeEvento(event);
+      await contextoGrupoDesdeEvento(event);
     const ruta = event.requestContext.http.path;
     const metodo = event.requestContext.http.method;
 

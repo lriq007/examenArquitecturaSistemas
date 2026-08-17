@@ -8,9 +8,7 @@ import {
   responderError,
   respuestaJson,
 } from "../compartido/respuestas.js";
-import {
-  contextoDesdeEvento,
-} from "../compartido/seguridad.js";
+import { contextoGrupoDesdeEvento } from "../compartido/alcance.js";
 import {
   repositorioFase4,
 } from "./repositorio.js";
@@ -36,7 +34,7 @@ export async function manejador(
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2> {
   try {
-    const { sesionId, grupoId } = contextoDesdeEvento(event);
+    const { sesionId, grupoId } = await contextoGrupoDesdeEvento(event);
 
     const ruta = event.requestContext.http.path;
     const metodo = event.requestContext.http.method;

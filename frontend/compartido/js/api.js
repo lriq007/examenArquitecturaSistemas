@@ -1,4 +1,4 @@
-const API_URL = 'https://elqy506l4e.execute-api.us-east-1.amazonaws.com';
+const API_URL = localStorage.getItem("urlApi") || "";
 
 async function llamarApi(ruta, opciones = {}) {
   const token = localStorage.getItem("tokenAcceso");

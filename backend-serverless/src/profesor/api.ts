@@ -27,7 +27,10 @@ import type {
 } from "./servicio.js";
 
 interface IngresoProfesorEntrada {
-  codigo: string;
+  usuario: string;
+  clave: string;
+  claveNueva?: string;
+  sesionChallenge?: string;
 }
 
 interface AccionEntrada {
@@ -50,23 +53,25 @@ export async function manejador(
 
       return respuestaJson(
         200,
-        ingresarProfesor(String(entrada.codigo || "")),
+        await ingresarProfesor({
+          usuario: String(entrada.usuario || ""),
+          clave: String(entrada.clave || ""),
+          claveNueva: String(entrada.claveNueva || ""),
+          sesionChallenge: String(entrada.sesionChallenge || ""),
+        }),
       );
     }
 
-    validarProfesorDesdeEvento(event);
+    const profesor = validarProfesorDesdeEvento(event);
 
     if (
       ruta === "/api/profesor/sesiones" &&
       metodo === "GET"
     ) {
-      const correo =
-        event.queryStringParameters?.correo;
-
       return respuestaJson(
         200,
         await listarSesionesProfesor(
-          correo,
+          profesor.sub,
           repositorioProfesor,
         ),
       );
@@ -83,6 +88,7 @@ export async function manejador(
         201,
         await crearSesiones(
           entrada,
+          profesor.sub,
           repositorioProfesor,
         ),
       );
@@ -99,6 +105,7 @@ export async function manejador(
         200,
         await obtenerControlSesion(
           decodeURIComponent(sesionIdDetalle),
+          profesor.sub,
           repositorioProfesor,
         ),
       );
@@ -118,6 +125,7 @@ export async function manejador(
         await ejecutarAccionSesion(
           decodeURIComponent(sesionIdAccion),
           entrada.accion,
+          profesor.sub,
           repositorioProfesor,
         ),
       );

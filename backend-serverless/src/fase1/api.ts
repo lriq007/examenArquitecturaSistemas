@@ -8,9 +8,7 @@ import {
   responderError,
   respuestaJson,
 } from "../compartido/respuestas.js";
-import {
-  contextoDesdeEvento,
-} from "../compartido/seguridad.js";
+import { contextoGrupoDesdeEvento } from "../compartido/alcance.js";
 import {
   repositorioFase1,
 } from "./repositorio.js";
@@ -46,7 +44,7 @@ export async function manejador(
   try {
     const ruta = event.requestContext.http.path;
     const metodo = event.requestContext.http.method;
-    const contexto = contextoDesdeEvento(event);
+    const contexto = await contextoGrupoDesdeEvento(event);
 
     if (
       ruta === "/api/fase1/estado" &&

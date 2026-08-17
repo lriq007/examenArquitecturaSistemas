@@ -291,11 +291,15 @@ if (exigirAccesoProfesor()) {
       botonCrear.textContent = "Creando...";
 
       try {
-        const resultado = await llamarApiProfesor(
+      const claveSolicitud = "solicitudCrearSesiones";
+      const solicitudId = localStorage.getItem(claveSolicitud) || crypto.randomUUID();
+      localStorage.setItem(claveSolicitud, solicitudId);
+      const resultado = await llamarApiProfesor(
           "/api/profesor/sesiones",
           {
             method: "POST",
-            body: JSON.stringify({
+          body: JSON.stringify({
+              solicitudId,
               nombre: document
                 .getElementById("nombreSesion")
                 .value.trim(),
@@ -315,7 +319,8 @@ if (exigirAccesoProfesor()) {
               alumnos,
             }),
           },
-        );
+      );
+      localStorage.removeItem(claveSolicitud);
 
         localStorage.setItem(
           "correoProfesor",

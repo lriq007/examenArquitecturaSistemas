@@ -15,22 +15,14 @@ Parameters:
     Default: MisionEmprende-prod
     Description: Nombre de la tabla DynamoDB creada por Terraform (Global Tables).
 
+  NombreBucketDatalake:
+    Type: String
+    Description: Bucket S3 privado usado por Athena para datos y resultados.
+
   OrigenCors:
     Type: String
-    Default: "*"
+    AllowedPattern: "https://.+|http://localhost(:[0-9]+)?"
     Description: Dominio autorizado para consumir la API.
-
-  ClaveToken:
-    Type: String
-    NoEcho: true
-    Default: cambiar-antes-de-produccion
-    Description: Clave usada para firmar los tokens.
-
-  ClaveAccesoProfesor:
-    Type: String
-    NoEcho: true
-    Default: profe123
-    Description: Clave temporal de acceso del profesor.
 
   DynamoDbEndpointLocal:
     Type: String
@@ -67,9 +59,10 @@ Globals:
     Environment:
       Variables:
         NOMBRE_TABLA: !Ref NombreTabla
-        CLAVE_TOKEN: !Ref ClaveToken
-        CLAVE_ACCESO_PROFESOR: !Ref ClaveAccesoProfesor
-        DURACION_TOKEN_SEGUNDOS: "28800"
+        COGNITO_PROFESORES_POOL_ID: !Ref PoolProfesores
+        COGNITO_PROFESORES_CLIENT_ID: !Ref ClienteProfesores
+        COGNITO_GRUPOS_POOL_ID: !Ref PoolGrupos
+        COGNITO_GRUPOS_CLIENT_ID: !Ref ClienteGrupos
         ORIGEN_CORS: !Ref OrigenCors
         ENTORNO: !Ref Entorno
         DYNAMODB_ENDPOINT: !Ref DynamoDbEndpointLocal
@@ -95,13 +88,132 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: "$default"
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 100
+        ThrottlingRateLimit: 50
+      RouteSettings:
+        "POST /api/acceso/ingresar":
+          ThrottlingBurstLimit: 5
+          ThrottlingRateLimit: 2
+        "POST /api/profesor/ingresar":
+          ThrottlingBurstLimit: 5
+          ThrottlingRateLimit: 2
+      Auth:
+        DefaultAuthorizer: AuthorizerGrupos
+        Authorizers:
+          AuthorizerProfesores:
+            JwtConfiguration:
+              issuer: !Sub "https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${PoolProfesores}"
+              audience:
+                - !Ref ClienteProfesores
+            IdentitySource: "$request.header.Authorization"
+          AuthorizerGrupos:
+            JwtConfiguration:
+              issuer: !Sub "https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${PoolGrupos}"
+              audience:
+                - !Ref ClienteGrupos
+            IdentitySource: "$request.header.Authorization"
+
+  PoolProfesores:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: !Sub "mision-emprende-${Entorno}-profesores"
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+
+  GrupoProfesores:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: PROFESOR
+      UserPoolId: !Ref PoolProfesores
+
+  ClienteProfesores:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref PoolProfesores
+      GenerateSecret: false
+      ExplicitAuthFlows: [ALLOW_USER_PASSWORD_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      AccessTokenValidity: 1
+      TokenValidityUnits:
+        AccessToken: hours
+
+  PoolGrupos:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: !Sub "mision-emprende-${Entorno}-grupos"
+      Schema:
+        - Name: grupoId
+          AttributeDataType: String
+          Mutable: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+
+  GrupoGrupos:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: GRUPO
+      UserPoolId: !Ref PoolGrupos
+
+  ClienteGrupos:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref PoolGrupos
+      GenerateSecret: false
+      ExplicitAuthFlows: [ALLOW_ADMIN_USER_PASSWORD_AUTH]
+      AccessTokenValidity: 8
+      TokenValidityUnits:
+        AccessToken: hours
+
+  PoliticaDynamoGlobal:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Acceso acotado a la Global Table y sus índices en ambas regiones.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:BatchWriteItem
+              - dynamodb:DeleteItem
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:Query
+              - dynamodb:TransactWriteItems
+              - dynamodb:UpdateItem
+            Resource:
+              - !Sub "arn:${AWS::Partition}:dynamodb:${RegionDynamoPrincipal}:${AWS::AccountId}:table/${NombreTabla}"
+              - !Sub "arn:${AWS::Partition}:dynamodb:${RegionDynamoPrincipal}:${AWS::AccountId}:table/${NombreTabla}/index/*"
+              - !Sub "arn:${AWS::Partition}:dynamodb:${RegionDynamoRespaldo}:${AWS::AccountId}:table/${NombreTabla}"
+              - !Sub "arn:${AWS::Partition}:dynamodb:${RegionDynamoRespaldo}:${AWS::AccountId}:table/${NombreTabla}/index/*"
 
   FuncionAcceso:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: .
       Handler: src/acceso/api.manejador
-      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      ReservedConcurrentExecutions: 10
+      Policies:
+        - !Ref PoliticaDynamoGlobal
+        - Statement:
+            - Effect: Allow
+              Action: cognito-idp:AdminInitiateAuth
+              Resource: !GetAtt PoolGrupos.Arn
       Events:
         Ingresar:
           Type: HttpApi
@@ -109,6 +221,8 @@ Resources:
             ApiId: !Ref ApiBackend
             Path: /api/acceso/ingresar
             Method: POST
+            Auth:
+              Authorizer: NONE
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
@@ -126,7 +240,19 @@ Resources:
     Properties:
       CodeUri: .
       Handler: src/profesor/api.manejador
-      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Timeout: 300
+      ReservedConcurrentExecutions: 5
+      Policies:
+        - !Ref PoliticaDynamoGlobal
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminCreateUser
+                - cognito-idp:AdminGetUser
+                - cognito-idp:AdminAddUserToGroup
+                - cognito-idp:AdminSetUserPassword
+                - cognito-idp:AdminUpdateUserAttributes
+              Resource: !GetAtt PoolGrupos.Arn
       Events:
         IngresarProfesor:
           Type: HttpApi
@@ -134,30 +260,40 @@ Resources:
             ApiId: !Ref ApiBackend
             Path: /api/profesor/ingresar
             Method: POST
+            Auth:
+              Authorizer: NONE
         ListarSesionesProfesor:
           Type: HttpApi
           Properties:
             ApiId: !Ref ApiBackend
             Path: /api/profesor/sesiones
             Method: GET
+            Auth:
+              Authorizer: AuthorizerProfesores
         CrearSesionProfesor:
           Type: HttpApi
           Properties:
             ApiId: !Ref ApiBackend
             Path: /api/profesor/sesiones
             Method: POST
+            Auth:
+              Authorizer: AuthorizerProfesores
         ObtenerSesionProfesor:
           Type: HttpApi
           Properties:
             ApiId: !Ref ApiBackend
             Path: /api/profesor/sesiones/{sesionId}
             Method: GET
+            Auth:
+              Authorizer: AuthorizerProfesores
         AccionesSesionProfesor:
           Type: HttpApi
           Properties:
             ApiId: !Ref ApiBackend
             Path: /api/profesor/sesiones/{sesionId}/acciones
             Method: POST
+            Auth:
+              Authorizer: AuthorizerProfesores
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
@@ -175,7 +311,8 @@ Resources:
     Properties:
       CodeUri: .
       Handler: src/sesiones/api.manejador
-      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Policies:
+        - !Ref PoliticaDynamoGlobal
       Events:
         ObtenerSesionActual:
           Type: HttpApi
@@ -200,7 +337,8 @@ Resources:
     Properties:
       CodeUri: .
       Handler: src/fase1/api.manejador
-      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Policies:
+        - !Ref PoliticaDynamoGlobal
       Events:
         EstadoFase1:
           Type: HttpApi
@@ -267,7 +405,8 @@ Resources:
     Properties:
       CodeUri: .
       Handler: src/fase2/api.manejador
-      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Policies:
+        - !Ref PoliticaDynamoGlobal
       Events:
         EstadoFase2:
           Type: HttpApi
@@ -334,7 +473,8 @@ Resources:
     Properties:
       CodeUri: .
       Handler: src/fase3/api.manejador
-      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Policies:
+        - !Ref PoliticaDynamoGlobal
       Events:
         EstadoFase3:
           Type: HttpApi
@@ -394,7 +534,8 @@ Resources:
     Properties:
       CodeUri: .
       Handler: src/fase4/api.manejador
-      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Policies:
+        - !Ref PoliticaDynamoGlobal
       Events:
         EstadoFase4:
           Type: HttpApi
@@ -437,7 +578,8 @@ Resources:
     Properties:
       CodeUri: .
       Handler: src/fase5/api.manejador
-      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Policies:
+        - !Ref PoliticaDynamoGlobal
       Events:
         EstadoFase5:
           Type: HttpApi
@@ -481,7 +623,33 @@ Resources:
     Properties:
       CodeUri: .
       Handler: src/analytics/api.manejador
-      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      Policies:
+        - !Ref PoliticaDynamoGlobal
+        - Statement:
+            - Effect: Allow
+              Action:
+                - athena:GetQueryExecution
+                - athena:GetQueryResults
+                - athena:StartQueryExecution
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - glue:GetDatabase
+                - glue:GetDatabases
+                - glue:GetTable
+                - glue:GetTables
+                - glue:GetPartitions
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - s3:GetBucketLocation
+                - s3:ListBucket
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${NombreBucketDatalake}"
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${NombreBucketDatalake}/*"
       Timeout: 30
       Environment:
         Variables:
@@ -494,6 +662,8 @@ Resources:
             ApiId: !Ref ApiBackend
             Path: /api/analytics/kpis/{sesionId}
             Method: GET
+            Auth:
+              Authorizer: AuthorizerProfesores
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
@@ -514,3 +684,15 @@ Outputs:
   NombreTabla:
     Description: Nombre de la tabla DynamoDB (creada por Terraform)
     Value: !Ref NombreTabla
+
+  PoolProfesoresId:
+    Value: !Ref PoolProfesores
+
+  ClienteProfesoresId:
+    Value: !Ref ClienteProfesores
+
+  PoolGruposId:
+    Value: !Ref PoolGrupos
+
+  ClienteGruposId:
+    Value: !Ref ClienteGrupos

@@ -16,11 +16,24 @@ export interface GrupoActual {
 }
 
 export interface RepositorioSesiones {
+  buscarVinculoGrupo(grupoSub: string): Promise<{ sesionId: string; grupoId: string } | null>;
   buscarSesion(sesionId: string): Promise<SesionActual | null>;
   buscarGrupo(sesionId: string, grupoId: string): Promise<GrupoActual | null>;
 }
 
 export const repositorioSesiones: RepositorioSesiones = {
+  async buscarVinculoGrupo(grupoSub) {
+    const resultado = await baseDatos.send(new GetCommand({
+      TableName: nombreTabla(),
+      Key: { PK: `IDENTIDAD#GRUPO#${grupoSub}`, SK: "VINCULO" },
+      ConsistentRead: true,
+    }));
+    if (!resultado.Item) return null;
+    return {
+      sesionId: String(resultado.Item.sesionId || ""),
+      grupoId: String(resultado.Item.grupoId || ""),
+    };
+  },
   async buscarSesion(sesionId: string): Promise<SesionActual | null> {
     const resultado = await baseDatos.send(
       new GetCommand({

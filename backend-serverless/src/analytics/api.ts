@@ -12,6 +12,7 @@ import {
 import {
   validarProfesorDesdeEvento,
 } from "../compartido/seguridad.js";
+import { exigirSesionProfesor } from "../compartido/alcance.js";
 
 import {
   obtenerKpisSesion,
@@ -21,7 +22,7 @@ export async function manejador(
   event: APIGatewayProxyEventV2,
 ): Promise<APIGatewayProxyResultV2> {
   try {
-    validarProfesorDesdeEvento(event);
+    const profesor = validarProfesorDesdeEvento(event);
 
     const ruta = event.requestContext.http.path;
     const metodo = event.requestContext.http.method;
@@ -44,6 +45,8 @@ export async function manejador(
           "SESION_ID_INVALIDO",
         );
       }
+
+      await exigirSesionProfesor(profesor.sub, sesionId);
 
       return respuestaJson(
         200,

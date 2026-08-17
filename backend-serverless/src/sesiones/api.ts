@@ -17,8 +17,7 @@ export async function manejador(
     if (ruta === "/api/sesiones/actual" && metodo === "GET") {
       const contexto = contextoDesdeEvento(event);
       const resultado = await obtenerSesionActual(
-        contexto.sesionId,
-        contexto.grupoId,
+        contexto.sub,
         repositorioSesiones,
       );
 

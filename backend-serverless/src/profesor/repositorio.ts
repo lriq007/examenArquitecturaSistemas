@@ -2,7 +2,9 @@ import {
   BatchWriteCommand,
   GetCommand,
   QueryCommand,
-  ScanCommand,
+  PutCommand,
+  DeleteCommand,
+  TransactWriteCommand,
   UpdateCommand,
   type BatchWriteCommandInput,
 
@@ -41,6 +43,7 @@ export interface SesionResumen {
 
 export interface RepositorioProfesor {
   guardarProfesor(
+    profesorSub: string,
     correo: string,
     facultad: string,
   ): Promise<void>;
@@ -50,8 +53,20 @@ export interface RepositorioProfesor {
   ): Promise<void>;
 
   listarSesiones(
-    correoProfesor?: string,
+    profesorSub: string,
   ): Promise<SesionResumen[]>;
+
+  guardarVinculoGrupo(vinculo: {
+    sesionId: string;
+    grupoId: string;
+    grupoSub: string;
+    cognitoUsername: string;
+  }): Promise<void>;
+
+  marcarProvisionamientoFallido(sesionId: string, grupoId: string): Promise<void>;
+
+  reservarCodigo(codigo: string, sesionId: string, grupoId: string): Promise<boolean>;
+  liberarCodigo(codigo: string, sesionId: string, grupoId: string): Promise<void>;
 
   obtenerSesion(
     sesionId: string,
@@ -148,6 +163,7 @@ function convertirSesion(
 
 export const repositorioProfesor: RepositorioProfesor = {
   async guardarProfesor(
+    profesorSub: string,
     correo: string,
     facultad: string,
   ): Promise<void> {
@@ -155,10 +171,11 @@ export const repositorioProfesor: RepositorioProfesor = {
 
     await escribirLote([
       {
-        PK: `PROFESOR#${correo}`,
+        PK: `IDENTIDAD#PROFESOR#${profesorSub}`,
         SK: "METADATOS",
         tipo: "PROFESOR",
         correo,
+        profesorSub,
         facultad,
         actualizadoEn: ahora,
       },
@@ -174,16 +191,15 @@ export const repositorioProfesor: RepositorioProfesor = {
   },
 
   async listarSesiones(
-    correoProfesor?: string,
+    profesorSub: string,
   ): Promise<SesionResumen[]> {
-    if (correoProfesor) {
       const resultado = await baseDatos.send(
         new QueryCommand({
           TableName: nombreTabla(),
           IndexName: "GSI1",
           KeyConditionExpression: "GSI1PK = :pk",
           ExpressionAttributeValues: {
-            ":pk": `PROFESOR#${correoProfesor}`,
+            ":pk": `PROFESOR_SUB#${profesorSub}`,
           },
           ScanIndexForward: false,
         }),
@@ -199,30 +215,82 @@ export const repositorioProfesor: RepositorioProfesor = {
         .sort((a, b) =>
           b.fechaCreacion.localeCompare(a.fechaCreacion),
         );
-    }
+  },
 
-    const resultado = await baseDatos.send(
-      new ScanCommand({
+  async guardarVinculoGrupo(vinculo): Promise<void> {
+    await baseDatos.send(new TransactWriteCommand({
+      TransactItems: [
+        {
+          Put: {
+            TableName: nombreTabla(),
+            Item: {
+              PK: `IDENTIDAD#GRUPO#${vinculo.grupoSub}`,
+              SK: "VINCULO",
+              tipo: "VINCULO_GRUPO",
+              ...vinculo,
+            },
+            ConditionExpression: "attribute_not_exists(PK) OR grupoId = :grupoId",
+            ExpressionAttributeValues: { ":grupoId": vinculo.grupoId },
+          },
+        },
+        {
+          Update: {
+            TableName: nombreTabla(),
+            Key: { PK: `SESION#${vinculo.sesionId}`, SK: `GRUPO#${vinculo.grupoId}` },
+            UpdateExpression: "SET grupoSub = :sub, cognitoUsername = :usuario, estadoProvisionamiento = :estado",
+            ExpressionAttributeValues: {
+              ":sub": vinculo.grupoSub,
+              ":usuario": vinculo.cognitoUsername,
+              ":estado": "LISTO",
+            },
+            ConditionExpression: "attribute_exists(PK)",
+          },
+        },
+      ],
+    }));
+  },
+
+  async marcarProvisionamientoFallido(sesionId, grupoId): Promise<void> {
+    await baseDatos.send(new UpdateCommand({
+      TableName: nombreTabla(),
+      Key: { PK: `SESION#${sesionId}`, SK: `GRUPO#${grupoId}` },
+      UpdateExpression: "SET estadoProvisionamiento = :estado, provisionamientoActualizadoEn = :ahora",
+      ExpressionAttributeValues: {
+        ":estado": "FALLIDO",
+        ":ahora": new Date().toISOString(),
+      },
+    }));
+  },
+
+  async reservarCodigo(codigo, sesionId, grupoId): Promise<boolean> {
+    try {
+      await baseDatos.send(new PutCommand({
         TableName: nombreTabla(),
-        FilterExpression: "#tipo = :tipo",
-        ExpressionAttributeNames: {
-          "#tipo": "tipo",
+        Item: {
+          PK: `CODIGO#${codigo}`,
+          SK: "RESERVA",
+          tipo: "RESERVA_CODIGO",
+          codigoAcceso: codigo,
+          sesionId,
+          grupoId,
         },
-        ExpressionAttributeValues: {
-          ":tipo": "SESION",
-        },
-      }),
-    );
+        ConditionExpression: "attribute_not_exists(PK) OR (sesionId = :sesionId AND grupoId = :grupoId)",
+        ExpressionAttributeValues: { ":sesionId": sesionId, ":grupoId": grupoId },
+      }));
+      return true;
+    } catch (error) {
+      if ((error as { name?: string }).name === "ConditionalCheckFailedException") return false;
+      throw error;
+    }
+  },
 
-    const items = (resultado.Items ?? []) as Array<
-      Record<string, unknown>
-    >;
-
-    return items
-      .map((item) => convertirSesion(item))
-      .sort((a, b) =>
-        b.fechaCreacion.localeCompare(a.fechaCreacion),
-      );
+  async liberarCodigo(codigo, sesionId, grupoId): Promise<void> {
+    await baseDatos.send(new DeleteCommand({
+      TableName: nombreTabla(),
+      Key: { PK: `CODIGO#${codigo}`, SK: "RESERVA" },
+      ConditionExpression: "sesionId = :sesionId AND grupoId = :grupoId",
+      ExpressionAttributeValues: { ":sesionId": sesionId, ":grupoId": grupoId },
+    }));
   },
 
   async obtenerSesion(

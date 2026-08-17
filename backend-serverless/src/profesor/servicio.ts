@@ -1,15 +1,17 @@
 import {
   randomBytes,
-  randomUUID,
-  timingSafeEqual,
+  createHash,
 } from "node:crypto";
 
 import {
   ErrorAplicacion,
 } from "../compartido/respuestas.js";
 import {
-  crearTokenProfesor,
-} from "../compartido/seguridad.js";
+  claveTecnicaGrupo,
+  completarClaveProfesor,
+  crearIdentidadGrupo,
+  ingresarProfesorCognito,
+} from "../compartido/cognito.js";
 import type {
   AlumnoEntrada,
   ItemDynamo,
@@ -22,6 +24,7 @@ export type ModoCreacion =
   | "personalizado";
 
 export interface CrearSesionesEntrada {
+  solicitudId: string;
   nombre: string;
   correoProfesor: string;
   facultad: string;
@@ -93,39 +96,20 @@ const TIEMPOS_POR_FASE: Record<string, number> = {
   reflexion: 0,
 };
 
-function compararSeguro(
-  valorA: string,
-  valorB: string,
-): boolean {
-  const a = Buffer.from(valorA);
-  const b = Buffer.from(valorB);
+export async function ingresarProfesor(entrada: {
+  usuario: string;
+  clave: string;
+  claveNueva?: string;
+  sesionChallenge?: string;
+}) {
+  const usuario = entrada.usuario.trim();
+  if (!usuario) throw new ErrorAplicacion("No fue posible iniciar sesión", 401, "CREDENCIALES_INVALIDAS");
 
-  return (
-    a.length === b.length &&
-    timingSafeEqual(a, b)
-  );
-}
+  const resultado = entrada.sesionChallenge && entrada.claveNueva
+    ? await completarClaveProfesor(usuario, entrada.claveNueva, entrada.sesionChallenge)
+    : await ingresarProfesorCognito(usuario, entrada.clave);
 
-export function ingresarProfesor(codigo: string) {
-  const esperado =
-    process.env.CLAVE_ACCESO_PROFESOR || "profe123";
-
-  if (
-    !codigo ||
-    !compararSeguro(codigo.trim(), esperado)
-  ) {
-    throw new ErrorAplicacion(
-      "Código de profesor incorrecto",
-      401,
-      "CODIGO_PROFESOR_INVALIDO",
-    );
-  }
-
-  return {
-    ok: true,
-    token: crearTokenProfesor(),
-    rol: "profesor",
-  };
+  return { ok: true, ...resultado, rol: "profesor" as const };
 }
 
 function normalizarCorreo(correo: string): string {
@@ -193,6 +177,16 @@ function codigoAcceso(): string {
   ).join("");
 }
 
+function idDeterminista(semilla: string): string {
+  const hex = createHash("sha256").update(semilla).digest("hex").slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
+}
+
+function codigoDeterminista(semilla: string): string {
+  return createHash("sha256").update(semilla).digest("base64url")
+    .toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6).padEnd(6, "A");
+}
+
 function gruposRecomendados(
   totalAlumnos: number,
 ): number {
@@ -214,8 +208,13 @@ function calcularSegundosRestantes(
 
 export async function crearSesiones(
   entrada: CrearSesionesEntrada,
+  profesorSub: string,
   repositorio: RepositorioProfesor,
 ) {
+  const solicitudId = String(entrada.solicitudId || "").trim();
+  if (!/^[0-9a-f-]{36}$/i.test(solicitudId)) {
+    throw new ErrorAplicacion("Falta un identificador idempotente válido", 400, "SOLICITUD_ID_INVALIDA");
+  }
   const nombre = String(entrada.nombre || "").trim();
   const correoProfesor = normalizarCorreo(
     String(entrada.correoProfesor || ""),
@@ -265,10 +264,11 @@ export async function crearSesiones(
   if (modo === "dividir_dos") {
     cantidadSesiones = 2;
   } else if (modo === "personalizado") {
-    cantidadSesiones = Math.max(
-      1,
-      Math.min(10, Number(entrada.cantidadSesiones || 1)),
-    );
+    const solicitadas = Number(entrada.cantidadSesiones);
+    if (!Number.isInteger(solicitadas) || solicitadas < 1 || solicitadas > 10) {
+      throw new ErrorAplicacion("La cantidad de sesiones debe ser un entero entre 1 y 10", 400, "CANTIDAD_SESIONES_INVALIDA");
+    }
+    cantidadSesiones = Math.min(solicitadas, alumnos.length);
   }
 
   const alumnosPorSesion = repartirEquitativamente(
@@ -278,6 +278,16 @@ export async function crearSesiones(
 
   const ahora = new Date().toISOString();
   const items: ItemDynamo[] = [];
+  const codigosGenerados = new Set<string>();
+  const siguienteCodigoUnico = (): string => {
+    for (;;) {
+      const candidato = codigoAcceso();
+      if (!codigosGenerados.has(candidato)) {
+        codigosGenerados.add(candidato);
+        return candidato;
+      }
+    }
+  };
   const respuestaSesiones: Array<{
     sesionId: string;
     nombre: string;
@@ -290,13 +300,14 @@ export async function crearSesiones(
   }> = [];
 
   await repositorio.guardarProfesor(
+    profesorSub,
     correoProfesor,
     facultad,
   );
 
   alumnosPorSesion.forEach(
     (alumnosSesion, indiceSesion) => {
-      const sesionId = randomUUID();
+      const sesionId = idDeterminista(`${profesorSub}:${solicitudId}:sesion:${indiceSesion}`);
 
       const nombreSesion =
         cantidadSesiones === 1
@@ -305,21 +316,21 @@ export async function crearSesiones(
 
       const cantidadGrupos =
         modo === "personalizado"
-          ? Math.max(
-              1,
-              Math.min(
-                30,
-                Number(entrada.gruposPorSesion || 1),
-              ),
-            )
+          ? (() => {
+              const solicitados = Number(entrada.gruposPorSesion);
+              if (!Number.isInteger(solicitados) || solicitados < 1 || solicitados > 30) {
+                throw new ErrorAplicacion("Los grupos por sesión deben ser un entero entre 1 y 30", 400, "GRUPOS_POR_SESION_INVALIDOS");
+              }
+              return Math.min(solicitados, alumnosSesion.length);
+            })()
           : gruposRecomendados(alumnosSesion.length);
 
       const grupos = Array.from(
         { length: cantidadGrupos },
         (_, indiceGrupo) => ({
-          grupoId: randomUUID(),
+          grupoId: idDeterminista(`${profesorSub}:${solicitudId}:sesion:${indiceSesion}:grupo:${indiceGrupo}`),
           nombreGrupo: `Grupo ${indiceGrupo + 1}`,
-          codigoAcceso: codigoAcceso(),
+          codigoAcceso: codigoDeterminista(`${profesorSub}:${solicitudId}:codigo:${indiceSesion}:${indiceGrupo}`),
           integrantes: [] as AlumnoEntrada[],
         }),
       );
@@ -335,7 +346,8 @@ export async function crearSesiones(
       items.push({
         PK: `SESION#${sesionId}`,
         SK: "METADATOS",
-        GSI1PK: `PROFESOR#${correoProfesor}`,
+        GSI1PK: `PROFESOR_SUB#${profesorSub}`,
+        profesorSub,
         GSI1SK: `SESION#${ahora}#${sesionId}`,
         tipo: "SESION",
         sesionId,
@@ -377,10 +389,13 @@ export async function crearSesiones(
           desafioNombre: "",
           legoCompletado: false,
           pitchCompletado: false,
+          estadoProvisionamiento: "PENDIENTE",
         });
 
-        grupo.integrantes.forEach((alumno) => {
-          const alumnoId = randomUUID();
+        grupo.integrantes.forEach((alumno, indiceIntegrante) => {
+          const alumnoId = idDeterminista(
+            `${profesorSub}:${solicitudId}:alumno:${indiceSesion}:${grupo.grupoId}:${indiceIntegrante}`,
+          );
 
           items.push({
             PK: `SESION#${sesionId}`,
@@ -407,7 +422,87 @@ export async function crearSesiones(
     },
   );
 
-  await repositorio.guardarItems(items);
+  let fallosProvisionamiento = 0;
+  for (const sesion of respuestaSesiones) {
+    for (const grupo of sesion.grupos) {
+      let reservado = false;
+      for (let intento = 0; intento < 10 && !reservado; intento += 1) {
+        reservado = await repositorio.reservarCodigo(
+          grupo.codigoAcceso,
+          sesion.sesionId,
+          grupo.grupoId,
+        );
+        if (!reservado) grupo.codigoAcceso = siguienteCodigoUnico();
+      }
+      if (!reservado) {
+        throw new ErrorAplicacion("No fue posible reservar un código único", 503, "CODIGOS_AGOTADOS");
+      }
+      const itemGrupo = items.find(
+        (item) => item.PK === `SESION#${sesion.sesionId}` && item.SK === `GRUPO#${grupo.grupoId}`,
+      );
+      if (itemGrupo) {
+        itemGrupo.codigoAcceso = grupo.codigoAcceso;
+        itemGrupo.GSI1PK = `CODIGO#${grupo.codigoAcceso}`;
+      }
+    }
+  }
+
+  try {
+    await repositorio.guardarItems(items);
+  } catch (error) {
+    await Promise.allSettled(respuestaSesiones.flatMap((sesion) =>
+      sesion.grupos.map((grupo) => repositorio.liberarCodigo(
+        grupo.codigoAcceso,
+        sesion.sesionId,
+        grupo.grupoId,
+      )),
+    ));
+    throw error;
+  }
+
+  for (const sesion of respuestaSesiones) {
+    for (const grupo of sesion.grupos) {
+      const username = `grupo-${grupo.grupoId}`;
+      let ultimoError: unknown;
+      for (let intento = 0; intento < 4; intento += 1) {
+        try {
+          const identidad = await crearIdentidadGrupo(
+            username,
+            grupo.grupoId,
+            claveTecnicaGrupo(grupo.codigoAcceso, grupo.grupoId),
+          );
+          await repositorio.guardarVinculoGrupo({
+            sesionId: sesion.sesionId,
+            grupoId: grupo.grupoId,
+            grupoSub: identidad.sub,
+            cognitoUsername: username,
+          });
+          ultimoError = undefined;
+          break;
+        } catch (error) {
+          ultimoError = error;
+          if (intento < 3) {
+            await new Promise((resolver) => setTimeout(
+              resolver,
+              Math.min(1000, 50 * 2 ** intento) + Math.floor(Math.random() * 50),
+            ));
+          }
+        }
+      }
+      if (ultimoError) {
+        await repositorio.marcarProvisionamientoFallido(sesion.sesionId, grupo.grupoId);
+        fallosProvisionamiento += 1;
+      }
+    }
+  }
+
+  if (fallosProvisionamiento > 0) {
+    throw new ErrorAplicacion(
+      "El provisionamiento de uno o más grupos no concluyó; puede reintentarse",
+      503,
+      "PROVISIONAMIENTO_INCOMPLETO",
+    );
+  }
 
   return {
     ok: true,
@@ -417,14 +512,10 @@ export async function crearSesiones(
 }
 
 export async function listarSesionesProfesor(
-  correoProfesor: string | undefined,
+  profesorSub: string,
   repositorio: RepositorioProfesor,
 ) {
-  const correo = correoProfesor
-    ? normalizarCorreo(correoProfesor)
-    : undefined;
-
-  const sesiones = await repositorio.listarSesiones(correo);
+  const sesiones = await repositorio.listarSesiones(profesorSub);
 
   return {
     ok: true,
@@ -434,6 +525,7 @@ export async function listarSesionesProfesor(
 
 export async function obtenerControlSesion(
   sesionId: string,
+  profesorSub: string,
   repositorio: RepositorioProfesor,
 ) {
   const elementos =
@@ -449,6 +541,9 @@ export async function obtenerControlSesion(
       404,
       "SESION_NO_ENCONTRADA",
     );
+  }
+  if (String(sesion.profesorSub || "") !== profesorSub) {
+    throw new ErrorAplicacion("Acceso no autorizado", 403, "ALCANCE_INVALIDO");
   }
 
   const grupos = elementos
@@ -524,6 +619,7 @@ export async function obtenerControlSesion(
 export async function ejecutarAccionSesion(
   sesionId: string,
   accion: AccionSesion,
+  profesorSub: string,
   repositorio: RepositorioProfesor,
 ) {
   const sesion = await repositorio.obtenerSesion(sesionId);
@@ -534,6 +630,9 @@ export async function ejecutarAccionSesion(
       404,
       "SESION_NO_ENCONTRADA",
     );
+  }
+  if (String(sesion.profesorSub || "") !== profesorSub) {
+    throw new ErrorAplicacion("Acceso no autorizado", 403, "ALCANCE_INVALIDO");
   }
 
   const faseActual = String(
@@ -648,5 +747,5 @@ export async function ejecutarAccionSesion(
     cambios,
   );
 
-  return obtenerControlSesion(sesionId, repositorio);
+  return obtenerControlSesion(sesionId, profesorSub, repositorio);
 }

@@ -60,9 +60,7 @@ locals {
 # ════════════════════════════════════════════════════════════════════════════
 # DynamoDB — Tabla principal con réplica (Global Tables v2)
 #
-# ⚠️  AWS Academy: verificar que LabRole tenga permiso dynamodb:CreateGlobalTable
-#    antes de ejecutar. Si falla, comentar el bloque `replica {}` y documentar
-#    la replicación multi-AZ nativa de DynamoDB como arquitectura distribuida.
+# La réplica activa-activa es una invariancia arquitectónica y no se omite.
 # ════════════════════════════════════════════════════════════════════════════
 resource "aws_dynamodb_table" "mision_emprende" {
   name         = var.nombre_tabla
@@ -126,10 +124,10 @@ resource "aws_s3_bucket" "frontend" {
 resource "aws_s3_bucket_public_access_block" "frontend" {
   bucket = aws_s3_bucket.frontend.id
 
-  block_public_acls       = false
-  block_public_policy     = false
-  ignore_public_acls      = false
-  restrict_public_buckets = false
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
 resource "aws_s3_bucket_versioning" "frontend" {
@@ -140,41 +138,61 @@ resource "aws_s3_bucket_versioning" "frontend" {
 }
 
 # ════════════════════════════════════════════════════════════════════════════
-# S3 — Hosting estático del frontend (sin CloudFront — AWS Academy no permite
-# crear CloudFront OAC ni OAI desde el rol LabRole)
-# ════════════════════════════════════════════════════════════════════════════
-resource "aws_s3_bucket_website_configuration" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
-
-  index_document {
-    suffix = "index.html"
-  }
-
-  error_document {
-    key = "index.html"
-  }
-
-  depends_on = [aws_s3_bucket_public_access_block.frontend]
+resource "aws_cloudfront_origin_access_control" "frontend" {
+  name                              = "${local.prefijo}-frontend-oac"
+  description                       = "Acceso privado de CloudFront al bucket frontend"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
 }
 
-# Política de lectura pública para el hosting estático
+# CloudFront entrega el sitio exclusivamente mediante HTTPS al navegador.
+resource "aws_cloudfront_distribution" "frontend" {
+  enabled             = true
+  default_root_object = "index.html"
+
+  origin {
+    domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name
+    origin_id                = "s3-frontend-privado"
+    origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
+  }
+
+  default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "s3-frontend-privado"
+    viewer_protocol_policy = "redirect-to-https"
+    forwarded_values {
+      query_string = false
+      cookies { forward = "none" }
+    }
+  }
+
+  restrictions {
+    geo_restriction { restriction_type = "none" }
+  }
+
+  viewer_certificate { cloudfront_default_certificate = true }
+  tags = local.tags
+}
+
 resource "aws_s3_bucket_policy" "frontend" {
   bucket = aws_s3_bucket.frontend.id
-
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "PublicReadGetObject"
-        Effect    = "Allow"
-        Principal = "*"
-        Action    = "s3:GetObject"
-        Resource  = "${aws_s3_bucket.frontend.arn}/*"
+    Statement = [{
+      Sid       = "AllowCloudFrontServicePrincipalReadOnly"
+      Effect    = "Allow"
+      Principal = { Service = "cloudfront.amazonaws.com" }
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.frontend.arn}/*"
+      Condition = {
+        StringEquals = {
+          "AWS:SourceArn" = aws_cloudfront_distribution.frontend.arn
+        }
       }
-    ]
+    }]
   })
-
-  depends_on = [aws_s3_bucket_public_access_block.frontend]
 }
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -200,7 +218,7 @@ resource "aws_s3_bucket_cors_configuration" "multimedia" {
   cors_rule {
     allowed_headers = ["*"]
     allowed_methods = ["GET", "PUT", "POST"]
-    allowed_origins = ["*"]
+    allowed_origins = ["https://${aws_cloudfront_distribution.frontend.domain_name}"]
     max_age_seconds = 3000
   }
 }
@@ -255,8 +273,13 @@ resource "aws_athena_workgroup" "mision_emprende" {
 # Outputs
 # ════════════════════════════════════════════════════════════════════════════
 output "url_frontend" {
-  description = "URL pública del frontend (S3 static website)"
-  value       = "http://${aws_s3_bucket.frontend.id}.s3-website-${var.region_primaria}.amazonaws.com"
+  description = "URL HTTPS pública del frontend"
+  value       = "https://${aws_cloudfront_distribution.frontend.domain_name}"
+}
+
+output "id_cloudfront" {
+  description = "ID de distribución para invalidaciones del despliegue"
+  value       = aws_cloudfront_distribution.frontend.id
 }
 
 output "nombre_bucket_frontend" {
