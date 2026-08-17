@@ -37,6 +37,10 @@ _bmad-output/
 # Claude Code (configuracion personal)
 .claude/
 
+# Agentes / skills de IA (solo uso local, no se versiona)
+.agents/
+AGENTS.md
+
 # Terraform — estado e infraestructura efimera
 .terraform/
 .terraform.lock.hcl

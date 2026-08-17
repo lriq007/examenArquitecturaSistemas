@@ -15,4 +15,4 @@ _Generado automáticamente por `npm run pruebas` (Vitest, `backend-serverless/pr
 - Resultado: PASA: reintentos agotados sin duplicar efecto; DLQ y reconciliador marcan FALLIDO/REINTENTOS_AGOTADOS; el redrive autorizado (ServicioFotografias.reintentar + nueva carga) recupera PROCESADA con un único efecto de dominio; el trabajo de control nunca se vio afectado.
 - Recuperación: CAOS_FOTOS restaurado a 'false' y CAOS_FOTOS_TRABAJO_ID vacío (afterEach lo refuerza); trabajo objetivo verificado en estado terminal COMPLETADO, con el nuevo intentoId autorizado, tras el redrive.
 
-Última ejecución: 2026-08-17T07:56:01.540Z
+Última ejecución: 2026-08-17T10:45:05.374Z
