@@ -7,6 +7,14 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  # Ruta absoluta fija en vez del default "./terraform.tfstate": el deploy corre
+  # tanto desde este checkout manual como desde el checkout separado del runner
+  # self-hosted (~/actions-runner/_work/...). Con backend local relativo, cada
+  # carpeta tendría su propio estado -- ambas deben apuntar al mismo archivo.
+  backend "local" {
+    path = "/home/lucas/.terraform-state-mision-emprende/terraform.tfstate"
+  }
 }
 
 # ── Proveedor primario (us-east-1) ──────────────────────────────────────────

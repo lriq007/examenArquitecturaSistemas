@@ -90,6 +90,9 @@ jobs:
           terraform apply -auto-approve
         env:
           TF_VAR_entorno: prod
+          # AWS Academy bloquea cloudfront:CreateOriginAccessControl/CreateDistribution;
+          # modo_academy=true usa el fallback de S3 Static Website (ver main.tf:57).
+          TF_VAR_modo_academy: "true"
 
       - name: 10. Capturar Outputs obligatorios de Terraform (AD-8, AR-11)
         id: tf_outputs
@@ -140,7 +143,7 @@ jobs:
             -e "url_frontend=${URL_FRONTEND}" \
             -e "origen_cors=${URL_FRONTEND}" \
             -e "entorno=prod" \
-            -e "modo_academy=false"
+            -e "modo_academy=true"
         env:
           ANSIBLE_LOCAL_TEMP: /tmp/ansible-local
           ANSIBLE_REMOTE_TEMP: /tmp/ansible-remote
