@@ -12,6 +12,11 @@ describe("identidad Cognito validada", () => {
       .toEqual({ sub: "abc", rol: "PROFESOR" });
   });
 
+  it("parsea el formato real de API Gateway (corchetes sin comillas, no es JSON)", () => {
+    expect(identidadDesdeEvento(evento({ sub: "abc", "cognito:groups": "[PROFESOR]" })))
+      .toEqual({ sub: "abc", rol: "PROFESOR" });
+  });
+
   it.each([
     [undefined, 401],
     [{ sub: "abc" }, 403],

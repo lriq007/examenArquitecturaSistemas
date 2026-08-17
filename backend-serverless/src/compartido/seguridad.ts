@@ -31,16 +31,16 @@ function gruposDesdeClaim(valor: Claims["cognito:groups"]): string[] {
   const texto = valor.trim();
   if (!texto) return [];
 
-  if (texto.startsWith("[")) {
-    try {
-      const lista = JSON.parse(texto) as unknown;
-      if (Array.isArray(lista)) return lista.map(String);
-    } catch {
-      return [];
-    }
-  }
+  // API Gateway (HTTP API JWT authorizer) entrega claims array como
+  // "[PROFESOR]" o "[PROFESOR GRUPO]" -- corchetes sin comillas, separado
+  // por espacios, NO es JSON valido. JSON.parse fallaria aqui siempre.
+  const sinCorchetes =
+    texto.startsWith("[") && texto.endsWith("]") ? texto.slice(1, -1) : texto;
 
-  return texto.split(",").map((grupo) => grupo.trim()).filter(Boolean);
+  return sinCorchetes
+    .split(/[,\s]+/)
+    .map((grupo) => grupo.trim().replace(/^["']|["']$/g, ""))
+    .filter(Boolean);
 }
 
 export function identidadDesdeEvento(event: APIGatewayProxyEventV2): IdentidadValidada {
