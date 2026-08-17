@@ -163,36 +163,78 @@ if (exigirAccesoProfesor()) {
   }
 
   function normalizarFila(fila) {
+    // Si la fila viene con delimitador de punto y coma en una sola clave (CSV de Excel en español)
+    const clavesOriginales = Object.keys(fila);
+    if (clavesOriginales.length === 1 && clavesOriginales[0].includes(";")) {
+      const cabeceras = clavesOriginales[0].split(";").map((c) => c.trim().toLowerCase());
+      const valores = String(fila[clavesOriginales[0]] ?? "").split(";").map((v) => v.trim());
+      const filaTransformada = {};
+      cabeceras.forEach((cab, i) => {
+        filaTransformada[cab] = valores[i] ?? "";
+      });
+      return normalizarFila(filaTransformada);
+    }
+
+    const normalizarTexto = (t) =>
+      String(t || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim()
+        .toLowerCase();
+
     const obtener = (...claves) => {
-      for (const clave of claves) {
+      const clavesNorm = claves.map(normalizarTexto);
+      for (const clave of clavesNorm) {
         const encontrada = Object.keys(fila).find(
-          (columna) =>
-            columna.trim().toLowerCase() ===
-            clave.toLowerCase(),
+          (columna) => normalizarTexto(columna) === clave || normalizarTexto(columna).includes(clave),
         );
 
-        if (encontrada) {
-          return String(fila[encontrada] ?? "").trim();
+        if (encontrada && fila[encontrada] !== undefined && fila[encontrada] !== null) {
+          const val = String(fila[encontrada]).trim();
+          if (val) return val;
         }
       }
 
       return "";
     };
 
+    const nombreCompleto = obtener("nombre completo", "estudiante", "alumno");
+    let nombre = obtener("nombre", "nombres", "first name", "name");
+    let apellidoPaterno = obtener("apellido paterno", "apellidopaterno", "paterno", "apellido 1", "last name", "apellido");
+    let apellidoMaterno = obtener("apellido materno", "apellidomaterno", "materno", "apellido 2");
+
+    // Si viene solo "nombre completo" y no vienen separados
+    if (nombreCompleto && !nombre && !apellidoPaterno) {
+      const partes = nombreCompleto.split(/\s+/);
+      nombre = partes[0] || "";
+      apellidoPaterno = partes.slice(1).join(" ") || "";
+    }
+
     return {
-      correo: obtener("Correo", "Email"),
-      rut: obtener("RUT", "Rut"),
-      nombre: obtener("Nombre", "Nombres"),
-      apellidoPaterno: obtener(
-        "Apellido Paterno",
-        "ApellidoPaterno",
-      ),
-      apellidoMaterno: obtener(
-        "Apellido Materno",
-        "ApellidoMaterno",
-      ),
-      carrera: obtener("Carrera"),
+      correo: obtener("correo institucional", "correo electronico", "correo", "email", "mail", "e-mail"),
+      rut: obtener("rut", "identificacion", "id", "documento", "dni"),
+      nombre: nombre || "Estudiante",
+      apellidoPaterno: apellidoPaterno || "",
+      apellidoMaterno: apellidoMaterno || "",
+      carrera: obtener("carrera", "programa", "facultad", "major") || "Ingeniería / Negocios",
     };
+  }
+
+  function parsearCsvTexto(texto) {
+    const lineas = texto.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (lineas.length < 2) return [];
+    const separador = lineas[0].includes(";") ? ";" : lineas[0].includes("\t") ? "\t" : ",";
+    const cabeceras = lineas[0].split(separador).map((c) => c.trim().replace(/^["']|["']$/g, ""));
+    const filas = [];
+    for (let i = 1; i < lineas.length; i += 1) {
+      const valores = lineas[i].split(separador).map((v) => v.trim().replace(/^["']|["']$/g, ""));
+      const fila = {};
+      cabeceras.forEach((cab, idx) => {
+        fila[cab] = valores[idx] ?? "";
+      });
+      filas.push(fila);
+    }
+    return filas;
   }
 
   archivoExcel.addEventListener(
@@ -202,8 +244,7 @@ if (exigirAccesoProfesor()) {
 
       if (!archivo) {
         alumnos = [];
-        nombreArchivo.textContent =
-          "Ningún archivo seleccionado";
+        nombreArchivo.textContent = "Ningún archivo seleccionado";
         renderPreview();
         return;
       }
@@ -211,33 +252,42 @@ if (exigirAccesoProfesor()) {
       nombreArchivo.textContent = archivo.name;
 
       try {
-        const contenido = await archivo.arrayBuffer();
-        const libro = XLSX.read(contenido, {
-          type: "array",
-        });
+        let filas = [];
 
-        const hoja = libro.Sheets[libro.SheetNames[0]];
-        const filas = XLSX.utils.sheet_to_json(hoja, {
-          defval: "",
-        });
+        if (typeof XLSX !== "undefined") {
+          const contenido = await archivo.arrayBuffer();
+          const libro = XLSX.read(contenido, {
+            type: "array",
+            raw: false,
+          });
+
+          const hoja = libro.Sheets[libro.SheetNames[0]];
+          filas = XLSX.utils.sheet_to_json(hoja, {
+            defval: "",
+          });
+        } else {
+          // Fallback a parser de texto CSV si XLSX no está disponible
+          const texto = await archivo.text();
+          filas = parsearCsvTexto(texto);
+        }
 
         alumnos = filas
           .map(normalizarFila)
           .filter(
             (alumno) =>
-              alumno.nombre ||
+              (alumno.nombre && alumno.nombre !== "Estudiante") ||
               alumno.correo ||
               alumno.rut,
           );
 
         if (!alumnos.length) {
           throw new Error(
-            "El archivo no contiene estudiantes válidos.",
+            "El archivo no contiene filas con datos válidos de estudiantes.",
           );
         }
 
         mostrarMensaje(
-          `${alumnos.length} estudiantes cargados correctamente.`,
+          `${alumnos.length} estudiantes cargados correctamente desde ${archivo.name}.`,
           "exito",
         );
 
@@ -247,12 +297,54 @@ if (exigirAccesoProfesor()) {
         renderPreview();
 
         mostrarMensaje(
-          error.message || "No fue posible leer el archivo.",
+          `Error al leer el archivo: ${error.message || "Formato no compatible"}`,
           "error",
         );
       }
     },
   );
+
+  const btnCargarEjemplo = document.getElementById("btnCargarEjemplo");
+  const btnDescargarPlantilla = document.getElementById("btnDescargarPlantilla");
+
+  if (btnCargarEjemplo) {
+    btnCargarEjemplo.addEventListener("click", () => {
+      alumnos = [
+        { correo: "matias.gonzalez@udd.cl", rut: "20.123.456-7", nombre: "Matías", apellidoPaterno: "González", apellidoMaterno: "Pérez", carrera: "Ingeniería Comercial" },
+        { correo: "sofia.munoz@udd.cl", rut: "20.234.567-8", nombre: "Sofía", apellidoPaterno: "Muñoz", apellidoMaterno: "Rojas", carrera: "Diseño" },
+        { correo: "lucas.silva@udd.cl", rut: "20.345.678-9", nombre: "Lucas", apellidoPaterno: "Silva", apellidoMaterno: "Castro", carrera: "Ingeniería Civil" },
+        { correo: "valentina.torres@udd.cl", rut: "20.456.789-0", nombre: "Valentina", apellidoPaterno: "Torres", apellidoMaterno: "López", carrera: "Periodismo" },
+        { correo: "diego.morales@udd.cl", rut: "20.567.890-1", nombre: "Diego", apellidoPaterno: "Morales", apellidoMaterno: "Soto", carrera: "Arquitectura" },
+        { correo: "camila.herrera@udd.cl", rut: "20.678.901-2", nombre: "Camila", apellidoPaterno: "Herrera", apellidoMaterno: "Díaz", carrera: "Psicología" },
+        { correo: "benjamin.castro@udd.cl", rut: "20.789.012-3", nombre: "Benjamín", apellidoPaterno: "Castro", apellidoMaterno: "Vargas", carrera: "Ingeniería Comercial" },
+        { correo: "isidora.araya@udd.cl", rut: "20.890.123-4", nombre: "Isidora", apellidoPaterno: "Araya", apellidoMaterno: "Fuentes", carrera: "Publicidad" },
+      ];
+      archivoExcel.removeAttribute("required");
+      nombreArchivo.textContent = "Nómina de ejemplo cargada (8 estudiantes)";
+      mostrarMensaje("8 estudiantes de prueba cargados correctamente.", "exito");
+      renderPreview();
+    });
+  }
+
+  if (btnDescargarPlantilla) {
+    btnDescargarPlantilla.addEventListener("click", () => {
+      const csvContent = "data:text/csv;charset=utf-8," +
+        "RUT,Nombre,Apellido Paterno,Apellido Materno,Correo,Carrera\n" +
+        "20.123.456-7,Matías,González,Pérez,matias.gonzalez@udd.cl,Ingeniería Comercial\n" +
+        "20.234.567-8,Sofía,Muñoz,Rojas,sofia.munoz@udd.cl,Diseño\n" +
+        "20.345.678-9,Lucas,Silva,Castro,lucas.silva@udd.cl,Ingeniería Civil\n" +
+        "20.456.789-0,Valentina,Torres,López,valentina.torres@udd.cl,Periodismo\n" +
+        "20.567.890-1,Diego,Morales,Soto,diego.morales@udd.cl,Arquitectura\n" +
+        "20.678.901-2,Camila,Herrera,Díaz,camila.herrera@udd.cl,Psicología\n";
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", "plantilla_estudiantes.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
+  }
 
   document
     .querySelectorAll('input[name="modoCreacion"]')
@@ -290,15 +382,25 @@ if (exigirAccesoProfesor()) {
       botonCrear.disabled = true;
       botonCrear.textContent = "Creando...";
 
+      function generarUUID() {
+        if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+          return crypto.randomUUID();
+        }
+        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+          const r = (Math.random() * 16) | 0;
+          const v = c === "x" ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
+        });
+      }
       try {
-      const claveSolicitud = "solicitudCrearSesiones";
-      const solicitudId = localStorage.getItem(claveSolicitud) || crypto.randomUUID();
-      localStorage.setItem(claveSolicitud, solicitudId);
-      const resultado = await llamarApiProfesor(
+        const claveSolicitud = "solicitudCrearSesiones";
+        const solicitudId = localStorage.getItem(claveSolicitud) || generarUUID();
+        localStorage.setItem(claveSolicitud, solicitudId);
+        const resultado = await llamarApiProfesor(
           "/api/profesor/sesiones",
           {
             method: "POST",
-          body: JSON.stringify({
+            body: JSON.stringify({
               solicitudId,
               nombre: document
                 .getElementById("nombreSesion")
@@ -319,8 +421,8 @@ if (exigirAccesoProfesor()) {
               alumnos,
             }),
           },
-      );
-      localStorage.removeItem(claveSolicitud);
+        );
+        localStorage.removeItem(claveSolicitud);
 
         localStorage.setItem(
           "correoProfesor",

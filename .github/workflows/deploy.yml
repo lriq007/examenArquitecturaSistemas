@@ -1,4 +1,15 @@
-name: Despliegue Productivo Protegido (OIDC + Environment Production)
+name: Despliegue Productivo Protegido (Self-Hosted Runner + Environment Production)
+
+# NOTA AWS ACADEMY: esta cuenta bloquea iam:CreateRole, iam:CreateOpenIDConnectProvider,
+# iam:CreateUser y iam:UpdateAssumeRolePolicy (política Pvoclabs2), por lo que no es posible
+# federar GitHub Actions vía OIDC ni usar un IAM user con Access Keys. Este workflow corre en
+# un runner self-hosted (una máquina tuya) que ya tiene una sesión de AWS Academy Learner Lab
+# válida en ~/.aws/credentials -- el mismo mecanismo que ya usas para el despliegue manual,
+# solo que ahora el disparador es el push a main en vez de un comando manual.
+#
+# Requisito para que este workflow tenga éxito: la sesión de AWS Academy en la máquina runner
+# debe seguir vigente (no expirada, <4h) en el momento en que corre. Si expiró, el job fallará
+# en el paso "Verificar credenciales AWS Academy activas" con un mensaje claro.
 
 on:
   push:
@@ -14,9 +25,7 @@ on:
         options:
           - prod
 
-# REGLA ARQUITECTÓNICA NFR33: OIDC para credenciales temporales en AWS
 permissions:
-  id-token: write # Requerido para solicitar el token JWT OIDC
   contents: read
 
 # REGLA ARQUITECTÓNICA NFR32: Serialización estricta de despliegues
@@ -26,9 +35,10 @@ concurrency:
 
 jobs:
   despliegue-produccion:
-    name: Despliegue en AWS (OIDC + Terraform + SAM + Ansible + Smoke Tests)
-    runs-on: ubuntu-latest
-    environment: production # Exige aprobación humana configurada en GitHub Environments
+    name: Despliegue en AWS (Self-Hosted + Terraform + SAM + Ansible + Smoke Tests)
+    runs-on: self-hosted
+    timeout-minutes: 30
+    environment: production # Aprobación humana opcional -- ver nota en Settings > Environments
 
     steps:
       - name: 1. Checkout del código
@@ -51,19 +61,18 @@ jobs:
         with:
           use-installer: true
 
-      - name: 5. Instalar Ansible
+      - name: 5. Verificar herramientas del runner (Ansible, AWS CLI)
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ansible
+          command -v ansible-playbook >/dev/null || { echo "::error::ansible no está instalado en este runner (ej. 'sudo pacman -S ansible' en Arch)."; exit 1; }
+          command -v aws >/dev/null || { echo "::error::aws CLI no está instalado en este runner."; exit 1; }
 
-      # ── Autenticación OIDC AWS ───────────────────────────────────────────────
-      - name: 6. Autenticación AWS mediante OIDC (Credenciales Temporales)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-1
-          audience: sts.amazonaws.com
-          role-session-name: GitHubActions-MisionEmprende-Production
+      # ── Credenciales AWS Academy (ya presentes en el runner, sin OIDC) ───────
+      - name: 6. Verificar credenciales AWS Academy activas
+        run: |
+          aws sts get-caller-identity || {
+            echo "::error::No hay credenciales AWS válidas en ~/.aws/credentials de este runner. Renueva la sesión de AWS Academy Learner Lab en esta máquina y vuelve a hacer push."
+            exit 1
+          }
 
       # ── Verificación Previa de Seguridad y Empaquetado ───────────────────────
       - name: 7. Instalar dependencias backend
