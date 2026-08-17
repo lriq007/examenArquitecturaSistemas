@@ -93,6 +93,8 @@ jobs:
           # AWS Academy bloquea cloudfront:CreateOriginAccessControl/CreateDistribution;
           # modo_academy=true usa el fallback de S3 Static Website (ver main.tf:57).
           TF_VAR_modo_academy: "true"
+          # Cargas fotográficas: política de retención de 30 días aprobada.
+          TF_VAR_habilitar_cargas_fotografias: "true"
 
       - name: 10. Capturar Outputs obligatorios de Terraform (AD-8, AR-11)
         id: tf_outputs
@@ -106,6 +108,7 @@ jobs:
           echo "ARN_DLQ_FOTOS=$(terraform output -raw arn_dlq_fotos)" >> $GITHUB_ENV
           echo "ARN_TEMA_ALARMAS=$(terraform output -raw arn_tema_alarmas)" >> $GITHUB_ENV
           echo "ID_CLOUDFRONT=$(terraform output -raw id_cloudfront || echo '')" >> $GITHUB_ENV
+          echo "CARGAS_FOTOGRAFIAS_HABILITADAS=$(terraform output -raw cargas_fotografias_habilitadas)" >> $GITHUB_ENV
 
       # ── Paso 2: Despliegue de Cómputo y API (AWS SAM) ────────────────────────
       - name: 11. Compilar y Desplegar AWS SAM
@@ -125,7 +128,8 @@ jobs:
               ArnDlqFotos="${ARN_DLQ_FOTOS}" \
               ArnTemaAlarmas="${ARN_TEMA_ALARMAS}" \
               OrigenCors="${URL_FRONTEND}" \
-              ModoDespliegue=academy
+              ModoDespliegue=academy \
+              CargasFotografiasHabilitadas="${CARGAS_FOTOGRAFIAS_HABILITADAS}"
 
       - name: 12. Capturar URL de API Gateway
         working-directory: backend-serverless
@@ -143,7 +147,9 @@ jobs:
             -e "url_frontend=${URL_FRONTEND}" \
             -e "origen_cors=${URL_FRONTEND}" \
             -e "entorno=prod" \
-            -e "modo_academy=true"
+            -e "modo_academy=true" \
+            -e "habilitar_cargas_fotografias=true" \
+            -e "politica_retencion_fotografias_aprobada=true"
         env:
           ANSIBLE_LOCAL_TEMP: /tmp/ansible-local
           ANSIBLE_REMOTE_TEMP: /tmp/ansible-remote
