@@ -1,27 +1,25 @@
 import { randomUUID } from "node:crypto";
 
 import { ErrorAplicacion } from "../compartido/respuestas.js";
-import { proyectarEstadoFoto, type EstadoIntentoFoto } from "../compartido/contratos/fotografias.js";
+import {
+  proyectarEstadoFoto,
+  type EstadoIntentoFoto,
+  type IntentoFoto,
+  type PuertoFotografias,
+  type FirmadorCarga,
+  type PuertoConsultaFotos,
+} from "../compartido/contratos/fotografias.js";
 
-export interface IntentoFoto {
-  sesionId: string; grupoId: string; trabajoId: string; intentoId: string;
-  estado: EstadoIntentoFoto; mime: string; tamano: number; clave: string;
-  creadoEn: string; actualizadoEn: string; numeroIntento: number;
-  versionId?: string; leaseUntil?: string; causa?: string; intentoAnteriorId?: string;
-  creadoPorSub?: string;
+export type { IntentoFoto, PuertoFotografias, FirmadorCarga, PuertoConsultaFotos };
+
+export function crearConsultaFotos(repo: PuertoFotografias): PuertoConsultaFotos {
+  return {
+    async verificarProcesada(trabajoId: string, sesionId: string, grupoId: string): Promise<boolean> {
+      const foto = await repo.obtener(trabajoId);
+      return foto?.sesionId === sesionId && foto.grupoId === grupoId && foto.estado === "COMPLETADO";
+    },
+  };
 }
-
-export interface PuertoFotografias {
-  crear(intento: IntentoFoto): Promise<void>;
-  obtener(trabajoId: string): Promise<IntentoFoto | null>;
-  registrarVersionYEncolar(datos: { trabajoId: string; intentoId: string; bucket: string; key: string; versionId: string }): Promise<"NUEVO" | "DUPLICADO" | "VERSION_CONFLICTIVA">;
-  adquirirLease(trabajoId: string, intentoId: string, hasta: string): Promise<boolean>;
-  completar(trabajoId: string, intentoId: string, efecto: Record<string, unknown>): Promise<void>;
-  fallar(trabajoId: string, intentoId: string, causa: string, estado?: "FALLIDO" | "EXPIRADO"): Promise<boolean>;
-  listarVencidos(ahora: string): Promise<IntentoFoto[]>;
-}
-
-export interface FirmadorCarga { firmar(clave: string, mime: string, tamano: number): Promise<string>; }
 
 const MIME_PERMITIDOS = new Set(["image/jpeg", "image/png"]);
 const MAX_BYTES = 25 * 1024 * 1024;

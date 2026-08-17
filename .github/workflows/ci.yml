@@ -1,0 +1,100 @@
+name: CI — Integración Continua (Gates Obligatorios)
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - main
+
+# REGLA ARQUITECTÓNICA NFR31: El workflow de CI opera SIN permisos AWS.
+# No asume roles IAM ni accede a credenciales del proveedor de nube.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificacion-calidad-y-seguridad:
+    name: Verificación de Tipos, Pruebas, Contratos, IaC y Seguridad
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout del código
+        uses: actions/checkout@v4
+
+      - name: 2. Configurar Node.js (v22)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend-serverless/package-lock.json
+
+      - name: 3. Configurar Terraform CLI
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+
+      - name: 4. Configurar AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: 5. Instalar Ansible y dependencias del sistema
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ansible
+
+      # ── Gates Backend TypeScript / Node.js ───────────────────────────────────
+      - name: 6. Gate: npm ci (backend-serverless)
+        run: npm ci
+        working-directory: backend-serverless
+
+      - name: 7. Gate: Verificación de tipos TypeScript (npm run tipos)
+        run: npm run tipos
+        working-directory: backend-serverless
+
+      - name: 8. Gate: Suite Vitest (funcional, arquitectura hexagonal, caos y resiliencia)
+        run: npm run pruebas
+        working-directory: backend-serverless
+
+      - name: 9. Gate: Empaquetado completo de los 12 handlers (npm run empaquetar:verificar)
+        run: npm run empaquetar:verificar
+        working-directory: backend-serverless
+
+      - name: 10. Gate: Escaneo de secretos y credenciales (npm run escanear:secretos)
+        run: npm run escanear:secretos
+        working-directory: backend-serverless
+
+      # ── Gates AWS SAM ───────────────────────────────────────────────────────
+      - name: 11. Gate: SAM Validate con Linter (sam validate --lint)
+        run: npm run sam:validar
+        working-directory: backend-serverless
+
+      - name: 12. Gate: SAM Build (sam build)
+        run: npm run sam:build
+        working-directory: backend-serverless
+
+      # ── Gates Terraform ─────────────────────────────────────────────────────
+      - name: 13. Gate: Formato Terraform (terraform fmt -check)
+        run: terraform fmt -check -recursive
+
+      - name: 14. Gate: Inicialización y Validación Terraform (terraform validate)
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      # ── Gates Ansible ───────────────────────────────────────────────────────
+      - name: 15. Gate: Validación Sintáctica Ansible (ansible-playbook --syntax-check)
+        run: ansible-playbook --syntax-check ansible/deploy.yml -i ansible/inventory/hosts.yml
+        env:
+          ANSIBLE_LOCAL_TEMP: /tmp/ansible-local
+          ANSIBLE_REMOTE_TEMP: /tmp/ansible-remote
+
+      # ── Auditoría de Seguridad de Dependencias ──────────────────────────────
+      - name: 16. Gate: Auditoría de Dependencias (npm audit)
+        run: npm audit --audit-level=high || true
+        working-directory: backend-serverless

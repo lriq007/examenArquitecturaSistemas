@@ -9,7 +9,7 @@ import {
   respuestaJson,
 } from "../compartido/respuestas.js";
 import { contextoGrupoDesdeEvento } from "../compartido/alcance.js";
-import { RepositorioFotografiasDynamo } from "../fotografias/repositorio.js";
+import { consultaFotosDefault as consultaFotos } from "../fotografias/api.js";
 import {
   repositorioFase3,
 } from "./repositorio.js";
@@ -25,9 +25,6 @@ import {
 import type {
   EtapaListaFase3,
 } from "./servicio.js";
-
-const repositorioFotos = new RepositorioFotografiasDynamo();
-const consultaFotos = { verificarProcesada: async (trabajoId: string, sesionId: string, grupoId: string) => { const foto = await repositorioFotos.obtener(trabajoId); return foto?.sesionId === sesionId && foto.grupoId === grupoId && foto.estado === "COMPLETADO"; } };
 
 interface ListoEntrada {
   etapa: EtapaListaFase3;

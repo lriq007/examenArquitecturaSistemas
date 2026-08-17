@@ -57,14 +57,14 @@ development_status:
   6-5-experimento-automatizado-del-consumidor-fotografico: done
   epic-6-retrospective: optional
 
-  epic-7: backlog
-  7-1-pruebas-de-limites-hexagonales: backlog
-  7-2-pruebas-estructurales-de-contratos-desplegables: backlog
-  7-3-integracion-continua-con-gates-obligatorios: backlog
-  7-4-despliegue-productivo-protegido-con-oidc: backlog
-  7-5-smoke-test-y-recuperacion-del-despliegue: backlog
-  7-6-demostracion-de-bloqueo-y-promocion-corregida: backlog
-  7-7-seguridad-y-compatibilidad-del-entorno-web: backlog
+  epic-7: done
+  7-1-pruebas-de-limites-hexagonales: done
+  7-2-pruebas-estructurales-de-contratos-desplegables: done
+  7-3-integracion-continua-con-gates-obligatorios: done
+  7-4-despliegue-productivo-protegido-con-oidc: done
+  7-5-smoke-test-y-recuperacion-del-despliegue: done
+  7-6-demostracion-de-bloqueo-y-promocion-corregida: done
+  7-7-seguridad-y-compatibilidad-del-entorno-web: done
   epic-7-retrospective: optional
 
 action_items: []

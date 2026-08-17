@@ -16,4 +16,4 @@ _Generado automáticamente por `npm run pruebas` (Vitest, `backend-serverless/pr
 - Resultado: PASA: 1er fallo no abre (bajo umbral); 2do fallo abre y sirve desde réplica; durante el cooldown rechaza la primaria de forma controlada; al expirar el cooldown con la bandera ya en false, cierra y vuelve a servir desde la primaria.
 - Recuperación: SIMULAR_FALLO_DYNAMODB_PRINCIPAL restaurado a 'false' (afterEach lo refuerza); breaker verificado en estado CERRADO; réplica jamás retirada.
 
-Última ejecución: 2026-08-17T05:35:00.092Z
+Última ejecución: 2026-08-17T07:40:27.144Z

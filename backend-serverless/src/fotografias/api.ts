@@ -6,7 +6,14 @@ import { ErrorAplicacion, leerJson, responderError, respuestaJson } from "../com
 import { FirmadorS3, RepositorioFotografiasDynamo } from "./repositorio.js";
 import { ServicioFotografias } from "./servicio.js";
 
-const servicio = new ServicioFotografias(new RepositorioFotografiasDynamo(), new FirmadorS3());
+const repositorioFotos = new RepositorioFotografiasDynamo();
+const servicio = new ServicioFotografias(repositorioFotos, new FirmadorS3());
+export const consultaFotosDefault = {
+  verificarProcesada: async (trabajoId: string, sesionId: string, grupoId: string) => {
+    const foto = await repositorioFotos.obtener(trabajoId);
+    return foto?.sesionId === sesionId && foto.grupoId === grupoId && foto.estado === "COMPLETADO";
+  },
+};
 
 export async function manejador(event: APIGatewayProxyEventV2) {
   try {

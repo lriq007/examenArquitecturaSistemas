@@ -1,0 +1,145 @@
+name: Despliegue Productivo Protegido (OIDC + Environment Production)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      entorno:
+        description: 'Entorno de destino'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - prod
+
+# REGLA ARQUITECTÓNICA NFR33: OIDC para credenciales temporales en AWS
+permissions:
+  id-token: write # Requerido para solicitar el token JWT OIDC
+  contents: read
+
+# REGLA ARQUITECTÓNICA NFR32: Serialización estricta de despliegues
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  despliegue-produccion:
+    name: Despliegue en AWS (OIDC + Terraform + SAM + Ansible + Smoke Tests)
+    runs-on: ubuntu-latest
+    environment: production # Exige aprobación humana configurada en GitHub Environments
+
+    steps:
+      - name: 1. Checkout del código
+        uses: actions/checkout@v4
+
+      - name: 2. Configurar Node.js (v22)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend-serverless/package-lock.json
+
+      - name: 3. Configurar Terraform CLI
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+
+      - name: 4. Configurar AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: 5. Instalar Ansible
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ansible
+
+      # ── Autenticación OIDC AWS ───────────────────────────────────────────────
+      - name: 6. Autenticación AWS mediante OIDC (Credenciales Temporales)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+          role-session-name: GitHubActions-MisionEmprende-Production
+
+      # ── Verificación Previa de Seguridad y Empaquetado ───────────────────────
+      - name: 7. Instalar dependencias backend
+        run: npm ci
+        working-directory: backend-serverless
+
+      - name: 8. Gate de verificación completa backend
+        run: npm run verificar
+        working-directory: backend-serverless
+
+      # ── Paso 1: Aplicación de Infraestructura Base (Terraform) ───────────────
+      - name: 9. Inicializar y Aplicar Terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve
+        env:
+          TF_VAR_entorno: prod
+
+      - name: 10. Capturar Outputs obligatorios de Terraform (AD-8, AR-11)
+        id: tf_outputs
+        run: |
+          echo "URL_FRONTEND=$(terraform output -raw url_frontend)" >> $GITHUB_ENV
+          echo "BUCKET_FRONTEND=$(terraform output -raw nombre_bucket_frontend)" >> $GITHUB_ENV
+          echo "BUCKET_MULTIMEDIA=$(terraform output -raw nombre_bucket_multimedia)" >> $GITHUB_ENV
+          echo "BUCKET_DATALAKE=$(terraform output -raw nombre_bucket_datalake)" >> $GITHUB_ENV
+          echo "NOMBRE_TABLA=$(terraform output -raw nombre_tabla_dynamodb)" >> $GITHUB_ENV
+          echo "ARN_COLA_FOTOS=$(terraform output -raw arn_cola_fotos)" >> $GITHUB_ENV
+          echo "ARN_DLQ_FOTOS=$(terraform output -raw arn_dlq_fotos)" >> $GITHUB_ENV
+          echo "ARN_TEMA_ALARMAS=$(terraform output -raw arn_tema_alarmas)" >> $GITHUB_ENV
+          echo "ID_CLOUDFRONT=$(terraform output -raw id_cloudfront || echo '')" >> $GITHUB_ENV
+
+      # ── Paso 2: Despliegue de Cómputo y API (AWS SAM) ────────────────────────
+      - name: 11. Compilar y Desplegar AWS SAM
+        working-directory: backend-serverless
+        run: |
+          npm run sam:build
+          sam deploy --no-confirm-changeset --no-fail-on-empty-changeset \
+            --stack-name "mision-emprende-backend-prod" \
+            --region us-east-1 \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides \
+              Entorno=prod \
+              NombreTabla="${NOMBRE_TABLA}" \
+              NombreBucketDatalake="${BUCKET_DATALAKE}" \
+              BucketMultimedia="${BUCKET_MULTIMEDIA}" \
+              ArnColaFotos="${ARN_COLA_FOTOS}" \
+              ArnDlqFotos="${ARN_DLQ_FOTOS}" \
+              ArnTemaAlarmas="${ARN_TEMA_ALARMAS}" \
+              OrigenCors="${URL_FRONTEND}" \
+              ModoDespliegue=productivo
+
+      - name: 12. Capturar URL de API Gateway
+        working-directory: backend-serverless
+        run: |
+          URL_API=$(aws cloudformation describe-stacks --stack-name mision-emprende-backend-prod --region us-east-1 --query "Stacks[0].Outputs[?OutputKey=='UrlApi'].OutputValue" --output text)
+          echo "URL_API=${URL_API}" >> $GITHUB_ENV
+
+      # ── Paso 3: Orquestación y Publicación Frontend (Ansible) ────────────────
+      - name: 13. Publicar Frontend e Invalidar CDN (Ansible)
+        run: |
+          ansible-playbook ansible/deploy.yml \
+            -e "url_api=${URL_API}" \
+            -e "bucket_frontend=${BUCKET_FRONTEND}" \
+            -e "id_cloudfront=${ID_CLOUDFRONT}" \
+            -e "url_frontend=${URL_FRONTEND}" \
+            -e "origen_cors=${URL_FRONTEND}" \
+            -e "entorno=prod" \
+            -e "modo_academy=false"
+        env:
+          ANSIBLE_LOCAL_TEMP: /tmp/ansible-local
+          ANSIBLE_REMOTE_TEMP: /tmp/ansible-remote
+
+      # ── Paso 4: Smoke Test Bloqueante (NFR23, NFR32) ─────────────────────────
+      - name: 14. Ejecutar Smoke Test Bloqueante (Navegador -> API -> Lambda -> DynamoDB)
+        working-directory: backend-serverless
+        run: |
+          npx tsx scripts/smoke-test.ts --url="${URL_API}"
+        env:
+          STRICT_SMOKE_TEST: "true"

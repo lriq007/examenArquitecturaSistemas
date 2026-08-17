@@ -165,8 +165,8 @@ Abre la URL del frontend en el browser:
 http://mision-emprende-prod-frontend.s3-website-us-east-1.amazonaws.com
 ```
 
-- Crea una sesión como **profesor** (clave por defecto: `profe123`)
-- Únete como **alumno** en otra pestaña usando el código de sesión
+- Inicia sesión como **profesor** con tus credenciales de Amazon Cognito
+- Los **grupos** ingresan con el código de grupo asignado
 
 ---
 
