@@ -49,12 +49,12 @@ development_status:
   5-2-evolucion-contractual-de-un-kpi: backlog
   epic-5-retrospective: optional
 
-  epic-6: backlog
-  6-1-failover-mediante-circuit-breaker-observable: backlog
-  6-2-aislamiento-por-clase-de-carga: backlog
-  6-3-observabilidad-correlacionada-y-alertas-operables: backlog
-  6-4-experimento-automatizado-de-indisponibilidad-regional: backlog
-  6-5-experimento-automatizado-del-consumidor-fotografico: backlog
+  epic-6: done
+  6-1-failover-mediante-circuit-breaker-observable: done
+  6-2-aislamiento-por-clase-de-carga: done
+  6-3-observabilidad-correlacionada-y-alertas-operables: done
+  6-4-experimento-automatizado-de-indisponibilidad-regional: done
+  6-5-experimento-automatizado-del-consumidor-fotografico: done
   epic-6-retrospective: optional
 
   epic-7: backlog

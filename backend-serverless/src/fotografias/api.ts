@@ -34,5 +34,5 @@ export async function manejador(event: APIGatewayProxyEventV2) {
       return respuestaJson(201, { ok: true, ...(await servicio.reintentar(trabajoId, sesionId, identidad.sub, { mime, tamano })) });
     }
     throw new ErrorAplicacion("Ruta no encontrada", 404, "RUTA_NO_ENCONTRADA");
-  } catch (error) { return responderError(error); }
+  } catch (error) { return responderError(error, event); }
 }

@@ -31,6 +31,12 @@ Parameters:
     Type: String
     Description: ARN de la DLQ de fotografías creada por Terraform.
 
+  ArnTemaAlarmas:
+    Type: String
+    Description: >
+      ARN del tema SNS de alarmas operables creado por Terraform
+      (AD-8: Terraform posee el tema; SAM solo lo referencia).
+
   OrigenCors:
     Type: String
     AllowedPattern: "https://.+|http://.+"
@@ -67,6 +73,22 @@ Parameters:
       - "false"
     Description: Simula indisponibilidad de la replica DynamoDB principal.
 
+  UmbralFallosBreaker:
+    Type: String
+    Default: "3"
+    Description: >
+      Cantidad de fallos consecutivos elegibles antes de abrir el Circuit
+      Breaker de failover DynamoDB. Valor provisional, pendiente de
+      calibración por prueba de carga (fuera de esta épica).
+
+  DuracionCooldownMsBreaker:
+    Type: String
+    Default: "60000"
+    Description: >
+      Duración en milisegundos del cooldown del Circuit Breaker de
+      failover DynamoDB mientras permanece ABIERTO. Valor provisional,
+      pendiente de calibración por prueba de carga (fuera de esta épica).
+
   ModoDespliegue:
     Type: String
     Default: productivo
@@ -76,6 +98,22 @@ Parameters:
     Type: String
     Default: "false"
     AllowedValues: ["true", "false"]
+
+  CaosFotos:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Habilita el mecanismo de fallo controlado de la consumidora
+      fotográfica. Sin CaosFotosTrabajoId fijado no provoca ningún
+      fallo (Always: nunca afecta a toda la cola).
+
+  CaosFotosTrabajoId:
+    Type: String
+    Default: ""
+    Description: >
+      trabajoId único acotado por el experimento de caos 6.5 cuando
+      CaosFotos es "true". Vacío por defecto y reversible.
 
 Conditions:
   EsAcademy: !Equals [!Ref ModoDespliegue, academy]
@@ -109,6 +147,8 @@ Globals:
         DYNAMODB_REGION_PRINCIPAL: !Ref RegionDynamoPrincipal
         DYNAMODB_REGION_RESPALDO: !Ref RegionDynamoRespaldo
         SIMULAR_FALLO_DYNAMODB_PRINCIPAL: !Ref SimularFalloDynamoPrincipal
+        UMBRAL_FALLOS_BREAKER: !Ref UmbralFallosBreaker
+        DURACION_COOLDOWN_MS_BREAKER: !Ref DuracionCooldownMsBreaker
         CARGAS_FOTOGRAFIAS_HABILITADAS: !Ref CargasFotografiasHabilitadas
 
   HttpApi:
@@ -911,6 +951,7 @@ Resources:
       CodeUri: .
       Handler: src/analytics/api.manejador
       Timeout: 30
+      ReservedConcurrentExecutions: 3
       Environment:
         Variables:
           ATHENA_DATABASE: "mision_emprende_db"
@@ -984,7 +1025,8 @@ Resources:
       ReservedConcurrentExecutions: 4
       Environment:
         Variables:
-          CAOS_FOTOS: "false"
+          CAOS_FOTOS: !Ref CaosFotos
+          CAOS_FOTOS_TRABAJO_ID: !Ref CaosFotosTrabajoId
           BUCKET_MULTIMEDIA: !Ref BucketMultimedia
       Events:
         ColaFotografias:
@@ -1024,7 +1066,12 @@ Resources:
   AlarmaErroresConsumidorFotos:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmDescription: Errores del bulkhead consumidor de fotografías
+      AlarmDescription: >
+        Cualquier error del bulkhead consumidor de fotografías (dispara en
+        la primera ocurrencia: EvaluationPeriods=1/Threshold=0, sensibilidad
+        provisional pendiente de calibración por prueba de carga).
+        Diagnóstico: revisar CloudWatch Logs de FuncionConsumidorFotografias
+        y el estado de la DLQ (AlarmaFotografiasDlq en Terraform) antes de redrivar.
       Namespace: AWS/Lambda
       MetricName: Errors
       Dimensions: [{ Name: FunctionName, Value: !Ref FuncionConsumidorFotografias }]
@@ -1034,6 +1081,53 @@ Resources:
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions: [!Ref ArnTemaAlarmas]
+
+  AlarmaErroresAnalytics:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: >
+        Cualquier error del bulkhead Analytics (consultas Athena; dispara en
+        la primera ocurrencia: EvaluationPeriods=1/Threshold=0, sensibilidad
+        provisional pendiente de calibración por prueba de carga).
+        Diagnóstico: revisar CloudWatch Logs de FuncionAnalytics y el
+        estado del workgroup/consulta Athena antes de reintentar.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref FuncionAnalytics }]
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref ArnTemaAlarmas]
+
+  AlarmaAutenticacionAnomala:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: >
+        Señal aproximada de autenticación anómala: esta alarma mide la
+        tasa agregada de 4xx de TODA la API (ApiBackend), no un
+        indicador específico de autenticación — el JWT Authorizer nativo
+        de API Gateway HTTP API no expone una métrica propia de
+        401/403. Se usa como proxy amplio mientras no exista una señal
+        más precisa. Umbral provisional, pendiente de calibración por
+        prueba de carga (fuera de esta épica). Diagnóstico: revisar
+        CloudWatch Logs de ApiBackend y los intentos fallidos en los
+        User Pools de Cognito (PoolProfesores/PoolGrupos) para el mismo
+        período, para distinguir 4xx de autenticación de otros 4xx de
+        validación de negocio.
+      Namespace: AWS/ApiGateway
+      MetricName: 4xx
+      Dimensions: [{ Name: ApiId, Value: !Ref ApiBackend }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 20
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref ArnTemaAlarmas]
 
 Outputs:
   UrlApi:

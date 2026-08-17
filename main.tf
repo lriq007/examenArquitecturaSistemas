@@ -302,6 +302,18 @@ resource "aws_s3_bucket_cors_configuration" "multimedia" {
   }
 }
 
+# ════════════════════════════════════════════════════════════════════════════
+# SNS — Tema de alarmas operables (Épica 6, AD-9)
+#
+# Terraform posee el tema y sus outputs (AD-8); SAM solo lo referencia por ARN
+# vía el parámetro ArnTemaAlarmas. Sin suscriptores reales por defecto: agregar
+# un email/SMS real requiere aprobación explícita (Ask First).
+# ════════════════════════════════════════════════════════════════════════════
+resource "aws_sns_topic" "alarmas" {
+  name = "${local.prefijo}-alarmas"
+  tags = local.tags
+}
+
 # Cola y DLQ son bulkheads propios del procesamiento fotográfico. La activación
 # del evento permanece bloqueada por defecto hasta aprobar la política de retención.
 resource "aws_sqs_queue" "fotografias_dlq" {
@@ -361,8 +373,9 @@ resource "aws_cloudwatch_metric_alarm" "fotografias_dlq" {
   evaluation_periods  = 1
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
-  alarm_description   = "Existen fotografías que agotaron sus reintentos"
+  alarm_description   = "Existen fotografías que agotaron sus reintentos. Diagnóstico: revisar el reconciliador (CloudWatch Logs) y evaluar redrive autorizado (AD-5)."
   treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarmas.arn]
 }
 
 resource "aws_cloudwatch_metric_alarm" "fotografias_antiguedad" {
@@ -375,8 +388,59 @@ resource "aws_cloudwatch_metric_alarm" "fotografias_antiguedad" {
   evaluation_periods  = 2
   threshold           = 300
   comparison_operator = "GreaterThanThreshold"
-  alarm_description   = "La cola fotográfica no está drenando a tiempo"
+  alarm_description   = "La cola fotográfica no está drenando a tiempo. Diagnóstico: revisar errores/concurrencia de FuncionConsumidorFotografias en CloudWatch Logs."
   treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarmas.arn]
+}
+
+# ════════════════════════════════════════════════════════════════════════════
+# Alarmas de Global Tables (Épica 6, AD-9): latencia de replicación y
+# throttling de la tabla. Umbrales provisionales, pendientes de calibración
+# por prueba de carga (fuera de esta épica).
+# ════════════════════════════════════════════════════════════════════════════
+resource "aws_cloudwatch_metric_alarm" "replica_latencia" {
+  alarm_name          = "${local.prefijo}-replica-latencia"
+  namespace           = "AWS/DynamoDB"
+  metric_name         = "ReplicationLatency"
+  dimensions          = { TableName = aws_dynamodb_table.mision_emprende.name, ReceivingRegion = var.region_replica }
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 2
+  threshold           = 5000
+  comparison_operator = "GreaterThanThreshold"
+  alarm_description   = "Latencia de replicación Global Tables hacia la réplica por encima de lo esperado (umbral provisional). Diagnóstico: consola DynamoDB > Global Tables > estado de la réplica."
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarmas.arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "tabla_throttle_lectura" {
+  alarm_name          = "${local.prefijo}-tabla-throttle-lectura"
+  namespace           = "AWS/DynamoDB"
+  metric_name         = "ReadThrottleEvents"
+  dimensions          = { TableName = aws_dynamodb_table.mision_emprende.name }
+  statistic           = "Sum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  alarm_description   = "Solicitudes de lectura limitadas (throttled) contra la tabla principal. Diagnóstico: revisar el estado del Circuit Breaker (CloudWatch Logs/EMF RuptorEstado) y considerar failover."
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarmas.arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "tabla_throttle_escritura" {
+  alarm_name          = "${local.prefijo}-tabla-throttle-escritura"
+  namespace           = "AWS/DynamoDB"
+  metric_name         = "WriteThrottleEvents"
+  dimensions          = { TableName = aws_dynamodb_table.mision_emprende.name }
+  statistic           = "Sum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  alarm_description   = "Solicitudes de escritura limitadas (throttled) contra la tabla principal. Diagnóstico: revisar el estado del Circuit Breaker (CloudWatch Logs/EMF RuptorEstado) y considerar failover."
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarmas.arn]
 }
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -476,4 +540,9 @@ output "arn_dlq_fotos" {
 output "cargas_fotografias_habilitadas" {
   description = "Gate de retención aplicado al evento S3→SQS"
   value       = var.habilitar_cargas_fotografias
+}
+
+output "arn_tema_alarmas" {
+  description = "ARN del tema SNS de alarmas operables (parámetro ArnTemaAlarmas de SAM); sin suscriptores reales por defecto"
+  value       = aws_sns_topic.alarmas.arn
 }

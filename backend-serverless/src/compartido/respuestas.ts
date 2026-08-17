@@ -3,6 +3,8 @@ import type {
   APIGatewayProxyResultV2,
 } from "aws-lambda";
 
+import { crearRegistrador } from "./observabilidad.js";
+
 export class ErrorAplicacion extends Error {
   constructor(
     mensaje: string,
@@ -40,8 +42,16 @@ export function leerJson<T>(event: APIGatewayProxyEventV2): T {
   }
 }
 
-export function responderError(error: unknown): APIGatewayProxyResultV2 {
+export function responderError(
+  error: unknown,
+  event?: Pick<APIGatewayProxyEventV2, "requestContext">,
+): APIGatewayProxyResultV2 {
+  const correlationId = event?.requestContext?.requestId;
+  const log = crearRegistrador({ correlationId, componente: "api" });
+
   if (error instanceof ErrorAplicacion) {
+    log.warn("error_aplicacion", { codigo: error.codigo, estado: error.estado, mensaje: error.message });
+
     return respuestaJson(error.estado, {
       ok: false,
       codigo: error.codigo,
@@ -49,7 +59,10 @@ export function responderError(error: unknown): APIGatewayProxyResultV2 {
     });
   }
 
-  console.error(error);
+  log.error("error_interno", {
+    mensaje: error instanceof Error ? error.message : "desconocido",
+    nombre: error instanceof Error ? error.name : undefined,
+  });
 
   return respuestaJson(500, {
     ok: false,

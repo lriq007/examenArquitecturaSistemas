@@ -177,6 +177,6 @@ export async function manejador(
       error: "Ruta de Fase 2 no encontrada",
     });
   } catch (error) {
-    return responderError(error);
+    return responderError(error, event);
   }
 }

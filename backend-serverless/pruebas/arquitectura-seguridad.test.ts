@@ -81,4 +81,42 @@ describe("arquitectura de seguridad desplegable", () => {
     expect(terraform).toContain("message_retention_seconds = 1209600");
     expect(terraform).toMatch(/variable "habilitar_cargas_fotografias"[\s\S]*?default\s*=\s*false/);
   });
+
+  it("conecta un tema SNS de alarmas operables sin solapar propiedad Terraform/SAM (AD-8)", () => {
+    // Terraform posee el tema y lo publica por output; SAM solo lo referencia por parámetro.
+    expect(terraform).toContain('resource "aws_sns_topic" "alarmas"');
+    expect(terraform).toContain('output "arn_tema_alarmas"');
+    expect(terraform).not.toContain("aws_sns_topic_subscription"); // Sin destinatario real por defecto (Ask First).
+
+    expect(template).toContain("ArnTemaAlarmas:");
+    expect(template).not.toContain('resource "aws_sns_topic"');
+  });
+
+  it("conecta AlarmActions al tema SNS en todas las alarmas operables nuevas y existentes", () => {
+    // SAM: Lambda/API.
+    expect(template).toMatch(/AlarmaErroresConsumidorFotos:[\s\S]*?AlarmActions: \[!Ref ArnTemaAlarmas\]/);
+    expect(template).toMatch(/AlarmaErroresAnalytics:[\s\S]*?AlarmActions: \[!Ref ArnTemaAlarmas\]/);
+    expect(template).toMatch(/AlarmaAutenticacionAnomala:[\s\S]*?AlarmActions: \[!Ref ArnTemaAlarmas\]/);
+
+    // Terraform: SQS/DLQ y Global Tables.
+    expect(terraform).toMatch(/resource "aws_cloudwatch_metric_alarm" "fotografias_dlq"[\s\S]*?alarm_actions\s*=\s*\[aws_sns_topic\.alarmas\.arn\]/);
+    expect(terraform).toMatch(/resource "aws_cloudwatch_metric_alarm" "fotografias_antiguedad"[\s\S]*?alarm_actions\s*=\s*\[aws_sns_topic\.alarmas\.arn\]/);
+    expect(terraform).toMatch(/resource "aws_cloudwatch_metric_alarm" "replica_latencia"[\s\S]*?alarm_actions\s*=\s*\[aws_sns_topic\.alarmas\.arn\]/);
+    expect(terraform).toMatch(/resource "aws_cloudwatch_metric_alarm" "tabla_throttle_lectura"[\s\S]*?alarm_actions\s*=\s*\[aws_sns_topic\.alarmas\.arn\]/);
+    expect(terraform).toMatch(/resource "aws_cloudwatch_metric_alarm" "tabla_throttle_escritura"[\s\S]*?alarm_actions\s*=\s*\[aws_sns_topic\.alarmas\.arn\]/);
+  });
+
+  it("documenta un procedimiento de diagnóstico en cada alarma operable nueva", () => {
+    for (const bloque of [
+      /AlarmaErroresAnalytics:[\s\S]*?AlarmDescription: >[\s\S]*?Diagnóstico/,
+      /AlarmaAutenticacionAnomala:[\s\S]*?AlarmDescription: >[\s\S]*?Diagnóstico/,
+    ]) {
+      expect(template).toMatch(bloque);
+    }
+
+    for (const nombre of ["replica_latencia", "tabla_throttle_lectura", "tabla_throttle_escritura"]) {
+      const bloque = new RegExp(`resource "aws_cloudwatch_metric_alarm" "${nombre}"[\\s\\S]*?Diagnóstico`);
+      expect(terraform).toMatch(bloque);
+    }
+  });
 });
